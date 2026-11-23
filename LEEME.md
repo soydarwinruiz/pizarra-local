@@ -37,14 +37,5 @@ npm run dist       # crea el instalador para tu sistema en la carpeta dist/
 
 ## Descargas automáticas (GitHub Actions)
 
-Cada vez que publiques una etiqueta de versión, GitHub compila la app para Windows (instalador y portátil), macOS (`.dmg` para Intel y Apple Silicon) y Linux (`.AppImage` y `.deb`), y la sube a la sección **Releases**:
-
-```bash
-git tag v1.1.0
-```
-
-```bash
-git push origin v1.1.0
-```
-
-También puedes lanzarlo a mano desde la pestaña **Actions → Compilar app de escritorio → Run workflow**. En ese caso los archivos quedan como *artifacts* de la ejecución.
+- **Cada cambio en `main`** compila la app para Windows (instalador y portátil), macOS (`.dmg` para Intel y Apple Silicon) y Linux (`.AppImage` y `.deb`). Los archivos aparecen en la pestaña **Actions**, dentro de la ejecución, en el apartado *Artifacts*.
+- **Para publicar una versión** con enlaces de descarga permanentes: ve a **Releases → Draft a new release**, escribe una etiqueta nueva (p. ej. `v1.1.0`) y pulsa **Publish release**. Unos 10 minutos después, los instaladores aparecen adjuntos a la release.

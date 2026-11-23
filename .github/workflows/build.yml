@@ -1,9 +1,14 @@
 name: Compilar app de escritorio
 
-# Se ejecuta al publicar una etiqueta de versión (p. ej. v1.1.0) o a mano desde la pestaña Actions.
+# - Cada envío a main: compila para Windows, macOS y Linux (descargas en la pestaña Actions).
+# - Al publicar una release en GitHub: además adjunta los instaladores a esa release.
+# - También se puede lanzar a mano desde Actions → Run workflow.
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+    paths: ['index.html', 'main.js', 'package.json', 'package-lock.json', 'icon.png', '.github/workflows/**']
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -38,7 +43,7 @@ jobs:
 
   release:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

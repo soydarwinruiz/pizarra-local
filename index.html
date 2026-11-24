@@ -90,6 +90,21 @@ body.presenting #presUI{display:flex}
 #timerBtn.run{color:var(--accent);font-weight:700}
 #timerBtn.done{background:#f24726;color:#fff}
 #dropHint{position:fixed;inset:0;border:4px dashed var(--accent);z-index:90;display:none;pointer-events:none;background:rgba(66,98,255,.06)}
+#richEditor{position:fixed;display:none;z-index:5;outline:none;overflow:hidden;padding:0;margin:0;font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.3;white-space:pre-wrap;word-wrap:break-word;user-select:text;-webkit-user-select:text;box-sizing:border-box;caret-color:currentColor}
+#richEditor ul,#richEditor ol{margin:0;padding-left:1.4em;text-align:inherit}
+#richEditor ul.check{list-style:none}
+#richEditor ul.check li{position:relative}
+#richEditor ul.check li::before{content:'☐';position:absolute;left:-1.25em;cursor:pointer}
+#richEditor:not(.al-left) li{list-style-position:inside}
+#richEditor:not(.al-left) ul.check li::before{position:static;margin-right:.3em}
+#richEditor ul.check li[data-checked="1"]::before{content:'☑';color:#4262ff}
+#richEditor ul.check li[data-checked="1"]{text-decoration:line-through;opacity:.55}
+#richBar{display:none;align-items:center;gap:1px;padding:3px;z-index:20}
+#richBar.open{display:flex}
+#richBar .tb{width:32px;height:32px;font-size:14px}
+#richBar .rsw{width:16px;height:16px;border-radius:50%;border:1px solid rgba(0,0,0,.25);cursor:pointer;padding:0;margin:0 1px;flex:none}
+#cropBar{left:50%;bottom:20px;transform:translateX(-50%);display:none;align-items:center;gap:6px;padding:6px 10px;z-index:30}
+#cropBar.open{display:flex}
 #fontPicker{width:270px;display:none;flex-direction:column;gap:6px}
 #fontPicker.open{display:flex}
 #fontSearch{width:100%;padding:7px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--text);font:inherit;outline:none}
@@ -123,6 +138,25 @@ body.presenting #presUI{display:flex}
 <body>
 <canvas id="c"></canvas>
 <textarea id="editor" spellcheck="false"></textarea>
+<div id="richEditor" contenteditable="true" spellcheck="false"></div>
+<div id="richBar" class="float ui">
+  <button class="tb" data-rc="bold" title="Negrita (Ctrl+B)"><b>N</b></button>
+  <button class="tb" data-rc="italic" title="Cursiva (Ctrl+I)"><i>K</i></button>
+  <button class="tb" data-rc="underline" title="Subrayado (Ctrl+U)"><u>S</u></button>
+  <button class="tb" data-rc="strikeThrough" title="Tachado (Ctrl+Shift+X)"><s>T</s></button>
+  <div class="sep"></div>
+  <span id="richColors" style="display:flex;align-items:center"></span>
+  <div class="sep"></div>
+  <button class="tb" data-rc="ul" title="Lista con viñetas">•≡</button>
+  <button class="tb" data-rc="ol" title="Lista numerada">1≡</button>
+  <button class="tb" data-rc="check" title="Lista de tareas (casillas)">☑</button>
+  <div class="sep"></div>
+  <button class="tb" data-rc="removeFormat" title="Quitar formato de lo seleccionado">⌫</button>
+</div>
+<div id="cropBar" class="float ui">
+  <b>✂ Recortar imagen</b><small style="color:var(--muted)">Arrastra los bordes · Enter aplica · Esc cancela</small>
+  <button class="bt" id="cropReset">Restablecer</button><button class="bt" id="cropCancel">Cancelar</button><button class="bt on" id="cropApply">✓ Aplicar</button>
+</div>
 
 <div id="topLeft" class="float ui">
   <button class="tb" id="menuBtn" title="Tableros">☰</button>
@@ -184,7 +218,7 @@ body.presenting #presUI{display:flex}
   <hr>
   <button class="mi" data-ex="json">💾 Guardar copia (.json)</button>
   <button class="mi" data-ex="import">📂 Importar tablero (.json)</button>
-  <button class="mi" data-ex="insertimg">➕ Insertar imagen…</button>
+  <button class="mi" data-ex="insertimg">➕ Insertar imagen o PDF…</button>
 </div>
 
 <div id="templateMenu" class="menu float">
@@ -233,7 +267,7 @@ body.presenting #presUI{display:flex}
 <div id="modalBg"><div id="modal" class="float"></div></div>
 <div id="toast"></div>
 <div id="dropHint"></div>
-<input type="file" id="fileImg" accept="image/*" multiple hidden>
+<input type="file" id="fileImg" accept="image/*,application/pdf,.pdf" multiple hidden>
 <input type="file" id="fileJson" accept=".json,application/json" hidden>
 
 <script>
@@ -354,7 +388,7 @@ function mutate(fn, mergeKey) {
   lastMerge = mergeKey || null; lastMergeT = Date.now();
   changed(!mergeKey);
 }
-function restore(json) { S.items = JSON.parse(json); reindex(); for (const id of [...S.sel]) if (!byId(id)) S.sel.delete(id); changed(); }
+function restore(json) { if (S.crop) endCrop(); S.items = JSON.parse(json); reindex(); for (const id of [...S.sel]) if (!byId(id)) S.sel.delete(id); changed(); }
 function undo() { commitEdit(); if (!undoStack.length) return; redoStack.push(snapshot()); restore(undoStack.pop()); updateUndoBtns(); }
 function redo() { commitEdit(); if (!redoStack.length) return; undoStack.push(snapshot()); restore(redoStack.pop()); updateUndoBtns(); }
 function updateUndoBtns() { $('#undoBtn').disabled = !undoStack.length; $('#redoBtn').disabled = !redoStack.length; }
@@ -414,7 +448,195 @@ function autoFit(text, w, h, b, i, f, maxS) {
   if (fitCache.size > 3000) fitCache.clear();
   fitCache.set(key, s); return s;
 }
+/* ---------------- Texto enriquecido ----------------
+   it.rich = [{k:'p'|'ul'|'ol'|'check', c:marcado, runs:[{t, b,i,u,s:bool, c:color}]}]
+   it.text guarda siempre el texto plano (búsqueda, exportación, compatibilidad). */
+const RICH_TYPES = new Set(['sticky', 'shape', 'text']);
+const RUN_KEYS = {bold: 'b', italic: 'i', underline: 'u', strike: 's', color: 'c'};
+const defaultTextColor = it => it.type === 'sticky' && it.fill === '#1a1a1a' ? '#ffffff' : '#1a1a1a';
+function getRich(it) {
+  if (it.rich && it.rich.length) return it.rich;
+  return String(it.text || '').split('\n').map(t => ({k: 'p', runs: t ? [{t}] : []}));
+}
+const richPlain = rich => rich.map(p => p.runs.map(r => r.t).join('')).join('\n');
+const isPlainRich = rich => rich.every(p => (p.k || 'p') === 'p' && p.runs.every(r => Object.keys(r).length === 1));
+function stripRuns(it, key) {
+  const rk = RUN_KEYS[key]; if (!rk || !it.rich) return;
+  it.rich.forEach(p => p.runs.forEach(r => delete r[rk]));
+  if (isPlainRich(it.rich)) delete it.rich;
+}
+const layoutCache = new Map();
+function layoutRich(it, size, maxW, json) {
+  const rich = getRich(it);
+  const key = (json || JSON.stringify(rich)) + '|' + size + '|' + maxW + '|' + (it.bold ? 1 : 0) + (it.italic ? 1 : 0) + '|' + (it.font || '');
+  let lines = layoutCache.get(key); if (lines) return lines;
+  lines = []; let num = 0, prevK = null, broke = false;
+  for (const [pi, p] of rich.entries()) {
+    const k = p.k || 'p';
+    num = k === 'ol' ? (prevK === 'ol' ? num + 1 : 1) : 0; prevK = k;
+    const ind = k === 'p' ? 0 : size * 1.4, avail = Math.max(size, maxW - ind);
+    let cur = {segs: [], w: 0, ind, k, pi, para: p, marker: k === 'ul' ? {t: '•'} : k === 'ol' ? {t: num + '.'} : k === 'check' ? {check: !!p.c} : null};
+    const out = [cur];
+    const push = (t, st, w, sp) => { cur.segs.push({t, st, w, sp}); cur.w += w; };
+    const trim = l => { while (l.segs.length && l.segs[l.segs.length - 1].sp) l.w -= l.segs.pop().w; };
+    const newLine = () => { trim(cur); cur = {segs: [], w: 0, ind, k, pi, para: p, marker: null}; out.push(cur); };
+    for (const r of p.runs) {
+      mctx.font = fontStr(size, r.b ?? it.bold, r.i ?? it.italic, it.font);
+      for (const piece of String(r.t).split(/(\s+)/)) {
+        if (!piece) continue;
+        const w = mctx.measureText(piece).width;
+        if (/^\s+$/.test(piece)) { if (cur.segs.length) push(piece, r, w, true); continue; }
+        if (cur.w + w > avail && cur.segs.some(sg => !sg.sp)) newLine();
+        if (w <= avail) { push(piece, r, w, false); continue; }
+        broke = true; // palabra más larga que la línea: se parte por letras
+        for (const ch of piece) { const cw = mctx.measureText(ch).width; if (cur.w + cw > avail && cur.segs.length) newLine(); push(ch, r, cw, false); }
+      }
+    }
+    trim(cur); lines.push(...out);
+  }
+  lines.broke = broke;
+  if (layoutCache.size > 3000) layoutCache.clear();
+  layoutCache.set(key, lines); return lines;
+}
+// Mayor tamaño (≤ maxS) con el que todo el texto cabe en la caja; evita partir palabras si puede.
+function fitRich(it, box, maxS) {
+  const json = JSON.stringify(getRich(it));
+  const key = json + '|' + box.w + '|' + box.h + '|' + maxS + '|' + (it.bold ? 1 : 0) + (it.italic ? 1 : 0) + '|' + (it.font || '');
+  let s = fitCache.get(key); if (s) return s;
+  const fits = (sz, nb) => { const L = layoutRich(it, sz, box.w, json); return L.length * sz * LH <= box.h && !(nb && L.broke); };
+  const search = nb => {
+    let lo = 2, hi = maxS;
+    if (fits(hi, nb)) return hi;
+    if (!fits(lo, nb)) return lo;
+    for (let k = 0; k < 14; k++) { const m = (lo + hi) / 2; if (fits(m, nb)) lo = m; else hi = m; }
+    return lo;
+  };
+  const whole = search(true), broken = whole >= maxS ? whole : search(false);
+  s = Math.max(2, Math.floor((whole >= broken * 0.7 ? whole : broken) * 4) / 4);
+  if (fitCache.size > 3000) fitCache.clear();
+  fitCache.set(key, s); return s;
+}
+function richGeom(it, box, size) {
+  const lines = layoutRich(it, size, box.w), lh = size * LH, th = lines.length * lh;
+  const y0 = box.valign === 'top' ? box.y : box.valign === 'bottom' ? box.y + box.h - th : box.y + (box.h - th) / 2;
+  const align = it.align || (it.type === 'text' ? 'left' : 'center');
+  return lines.map((l, i) => {
+    const avail = box.w - l.ind;
+    return {l, x: box.x + l.ind + (align === 'right' ? avail - l.w : align === 'center' ? (avail - l.w) / 2 : 0), ly: y0 + lh * i + lh / 2};
+  });
+}
+function drawRich(c, it, box, size) {
+  const base = it.color || defaultTextColor(it), t = Math.max(size / 15, 0.5);
+  c.textBaseline = 'middle'; c.textAlign = 'left';
+  for (const {l, x, ly} of richGeom(it, box, size)) {
+    const done = l.k === 'check' && l.para.c;
+    if (l.marker) {
+      if (l.marker.check !== undefined) {
+        const q = size * 0.8, bx = x - size * 1.15, by = ly - q / 2; c.lineWidth = Math.max(size / 12, 0.75);
+        if (l.marker.check) { c.fillStyle = ACC; c.fillRect(bx, by, q, q); c.strokeStyle = '#fff'; c.lineCap = 'round'; c.beginPath(); c.moveTo(bx + q * .22, by + q * .52); c.lineTo(bx + q * .43, by + q * .72); c.lineTo(bx + q * .8, by + q * .3); c.stroke(); }
+        else { c.strokeStyle = base; c.strokeRect(bx, by, q, q); }
+      } else { c.font = fontStr(size, false, false, it.font); c.fillStyle = base; c.textAlign = 'right'; c.fillText(l.marker.t, x - size * 0.35, ly); c.textAlign = 'left'; }
+    }
+    let sx = x;
+    for (const sg of l.segs) {
+      const st = sg.st; c.font = fontStr(size, st.b ?? it.bold, st.i ?? it.italic, it.font); c.fillStyle = done ? '#999999' : (st.c || base);
+      if (!sg.sp) c.fillText(sg.t, sx, ly);
+      if (st.u ?? it.underline) c.fillRect(sx, ly + size * 0.42, sg.w, t);
+      if ((st.s ?? it.strike) || done) c.fillRect(sx, ly + size * 0.04 - t / 2, sg.w, t);
+      sx += sg.w;
+    }
+  }
+}
+// Casilla de una lista de tareas bajo el punto w (coordenadas de mundo), o null.
+function checkAt(it, w) {
+  if (!it || !RICH_TYPES.has(it.type) || !it.rich || !it.rich.some(p => p.k === 'check')) return null;
+  const lp = it.rot ? rotPt(w, center(it), -it.rot) : w, box = textBox(it), size = it.type === 'text' ? it.fontSize : fontSizeFor(it, box);
+  for (const {l, x, ly} of richGeom(it, box, size)) {
+    if (!l.marker || l.marker.check === undefined) continue;
+    const q = size * 0.8, bx = x - size * 1.15, pad = Math.max(3 / S.view.z, size * 0.15);
+    if (lp.x >= bx - pad && lp.x <= bx + q + pad && lp.y >= ly - q / 2 - pad && lp.y <= ly + q / 2 + pad) return it.rich[l.pi]; // la caché puede guardar copias: se usa el índice
+  }
+  return null;
+}
+function normColor(c) {
+  c = String(c || '').trim().toLowerCase();
+  const m = c.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/); if (m) return '#' + [m[1], m[2], m[3]].map(v => (+v).toString(16).padStart(2, '0')).join('');
+  if (/^#[0-9a-f]{3}$/.test(c)) return '#' + [...c.slice(1)].map(x => x + x).join('');
+  return c;
+}
+function richToHtml(it) {
+  const base = {u: !!it.underline, s: !!it.strike};
+  const runsHtml = runs => runs.map(r => {
+    const css = [];
+    if (r.b != null) css.push(`font-weight:${r.b ? 700 : 400}`);
+    if (r.i != null) css.push(`font-style:${r.i ? 'italic' : 'normal'}`);
+    if (r.u != null || r.s != null) css.push(`text-decoration-line:${[(r.u ?? base.u) && 'underline', (r.s ?? base.s) && 'line-through'].filter(Boolean).join(' ') || 'none'}`);
+    if (r.c) css.push(`color:${r.c}`);
+    return css.length ? `<span style="${css.join(';')}">${esc(r.t)}</span>` : esc(r.t);
+  }).join('');
+  let html = '', list = null;
+  const close = () => { if (list) { html += list === 'ol' ? '</ol>' : '</ul>'; list = null; } };
+  for (const p of getRich(it)) {
+    const k = p.k || 'p';
+    if (k === 'p') { close(); html += `<div>${runsHtml(p.runs) || '<br>'}</div>`; continue; }
+    if (list !== k) { close(); html += k === 'ol' ? '<ol>' : k === 'check' ? '<ul class="check">' : '<ul>'; list = k; }
+    html += `<li${k === 'check' ? ` data-checked="${p.c ? 1 : 0}"` : ''}>${runsHtml(p.runs) || '<br>'}</li>`;
+  }
+  close(); return html;
+}
+function domToRich(root, it) {
+  const base = {b: !!it.bold, i: !!it.italic, u: !!it.underline, s: !!it.strike, c: normColor(it.color || defaultTextColor(it))};
+  const paras = []; let cur = null;
+  const newPara = (k, c, open) => { cur = {k, runs: []}; if (k === 'check') cur.c = !!c; if (open) cur._open = true; paras.push(cur); };
+  const same = (a, b) => ['b', 'i', 'u', 's', 'c'].every(k => a[k] === b[k]);
+  const addText = (t, st) => {
+    if (!t) return; if (!cur) newPara('p'); delete cur._open;
+    const r = {t}; for (const k of ['b', 'i', 'u', 's']) if (!!st[k] !== base[k]) r[k] = !!st[k];
+    if (st.c && st.c !== base.c) r.c = st.c;
+    const last = cur.runs[cur.runs.length - 1]; if (last && same(last, r)) last.t += t; else cur.runs.push(r);
+  };
+  const styleOf = (el, st) => {
+    const o = {...st}, t = el.tagName, cs = el.style;
+    if (t === 'B' || t === 'STRONG') o.b = true; if (t === 'I' || t === 'EM') o.i = true; if (t === 'U') o.u = true;
+    if (t === 'S' || t === 'STRIKE' || t === 'DEL') o.s = true; if (t === 'FONT' && el.getAttribute('color')) o.c = normColor(el.getAttribute('color'));
+    if (cs.fontWeight) o.b = cs.fontWeight === 'bold' || cs.fontWeight === 'bolder' || +cs.fontWeight >= 600;
+    if (cs.fontStyle) o.i = cs.fontStyle === 'italic' || cs.fontStyle === 'oblique';
+    const td = cs.textDecorationLine || cs.textDecoration || '';
+    if (td) { if (td.includes('none')) { o.u = false; o.s = false; } if (td.includes('underline')) o.u = true; if (td.includes('line-through')) o.s = true; }
+    if (cs.color) o.c = normColor(cs.color);
+    return o;
+  };
+  const kindOf = el => {
+    if (el.tagName !== 'LI') return ['p'];
+    const L = el.parentElement;
+    if (L && L.tagName === 'OL') return ['ol'];
+    if (L && L.classList.contains('check')) return ['check', el.dataset.checked === '1'];
+    return ['ul'];
+  };
+  const BLOCK = /^(DIV|P|LI|H[1-6]|BLOCKQUOTE|PRE)$/;
+  const walk = (node, st, kind) => {
+    for (const ch of node.childNodes) {
+      if (ch.nodeType === 3) { addText(ch.data.replace(/\n/g, ' '), st); continue; }
+      if (ch.nodeType !== 1) continue;
+      const tag = ch.tagName;
+      if (tag === 'BR') {
+        let nx = ch.nextSibling; while (nx && nx.nodeType === 3 && !nx.data) nx = nx.nextSibling;
+        if (!nx) continue; // <br> de relleno al final de un bloque
+        newPara(kind === 'p' ? 'p' : kind, false);
+      } else if (tag === 'UL' || tag === 'OL') { walk(ch, styleOf(ch, st), 'p'); cur = null; }
+      else if (BLOCK.test(tag)) {
+        const [k, c] = kindOf(ch);
+        if (cur && cur._open && !cur.runs.length) paras.pop();
+        newPara(k, c, true); walk(ch, styleOf(ch, st), k); cur = null;
+      } else walk(ch, styleOf(ch, st), kind);
+    }
+  };
+  walk(root, base, 'p');
+  paras.forEach(p => delete p._open);
+  return paras.length ? paras : [{k: 'p', runs: []}];
+}
 function fitTextHeight(it) {
+  if (RICH_TYPES.has(it.type)) { it.h = Math.max(1, layoutRich(it, it.fontSize, it.w).length) * it.fontSize * LH; return; }
   const lines = wrap(it.text || ' ', it.fontSize, it.w, it.bold, it.italic, it.font);
   it.h = Math.max(1, lines.length) * it.fontSize * LH;
 }
@@ -441,7 +663,7 @@ function fontSizeFor(it, box) {
   if (it.type === 'frame') return 13 / S.view.z;
   const auto = it.fontSize === 'auto' || it.fontSize == null;
   // Notas y formas: en «Auto» el texto llena el espacio; con tamaño fijo se reduce solo si no cabe.
-  if (it.type === 'sticky' || it.type === 'shape') return autoFit(it.text || '', box.w, box.h, it.bold, it.italic, it.font, auto ? box.h * 0.3 : it.fontSize);
+  if (it.type === 'sticky' || it.type === 'shape') return fitRich(it, box, auto ? box.h * 0.3 : it.fontSize);
   return auto ? 16 : it.fontSize;
 }
 function drawTextBlock(c, text, box, size, o) {
@@ -621,7 +843,7 @@ function drawItem(c, it) {
     case 'sticky': {
       c.save(); c.shadowColor = 'rgba(0,0,0,.22)'; c.shadowBlur = 10; c.shadowOffsetY = 4;
       c.fillStyle = it.fill; c.fillRect(it.x, it.y, it.w, it.h); c.restore();
-      if (!skipText && it.text) { const tb = textBox(it); drawTextBlock(c, it.text, tb, fontSizeFor(it, tb), {...it, color: it.color || (it.fill === '#1a1a1a' ? '#fff' : '#1a1a1a'), valign: tb.valign}); }
+      if (!skipText && (it.text || it.rich)) { const tb = textBox(it); drawRich(c, it, tb, fontSizeFor(it, tb)); }
       if (it.author) { c.font = fontStr(Math.max(8, it.h * 0.055), false, false); c.fillStyle = 'rgba(0,0,0,.45)'; c.textAlign = 'right'; c.textBaseline = 'bottom'; c.fillText(it.author, it.x + it.w - it.w * 0.05, it.y + it.h - it.h * 0.03); }
       break;
     }
@@ -633,14 +855,22 @@ function drawItem(c, it) {
         c.setLineDash(it.dash ? [it.strokeWidth * 3, it.strokeWidth * 2] : []); c.stroke();
         if (it.shape === 'cylinder') { const ry = Math.min(it.h * .15, it.w * .25); c.beginPath(); c.ellipse(it.x + it.w / 2, it.y + ry, it.w / 2, ry, 0, 0, Math.PI, false); c.stroke(); }
       }
-      if (!skipText && it.text) { const tb = textBox(it); drawTextBlock(c, it.text, tb, fontSizeFor(it, tb), {...it, valign: tb.valign}); }
+      if (!skipText && (it.text || it.rich)) { const tb = textBox(it); drawRich(c, it, tb, fontSizeFor(it, tb)); }
       break;
     }
-    case 'text': if (!skipText) drawTextBlock(c, it.text || '', textBox(it), it.fontSize, {...it, valign: 'top'}); break;
+    case 'text': if (!skipText) drawRich(c, it, textBox(it), it.fontSize); break;
     case 'image': {
-      const img = getImg(it.asset);
-      if (img && img.complete && img.naturalWidth) c.drawImage(img, it.x, it.y, it.w, it.h);
-      else { c.fillStyle = '#ddd'; c.fillRect(it.x, it.y, it.w, it.h); }
+      const img = getImg(it.asset), ok = img && img.complete && img.naturalWidth;
+      if (!ok) { c.fillStyle = '#ddd'; c.fillRect(it.x, it.y, it.w, it.h); break; }
+      if (S.crop && S.crop.id === it.id) { // modo recorte: imagen completa atenuada + zona recortada nítida
+        const {full: f, r} = S.crop;
+        c.globalAlpha *= 0.35; c.drawImage(img, f.x, f.y, f.w, f.h); c.globalAlpha /= 0.35;
+        c.save(); c.beginPath(); c.rect(r.x, r.y, r.w, r.h); c.clip(); c.drawImage(img, f.x, f.y, f.w, f.h); c.restore();
+        break;
+      }
+      const cr = it.crop, nw = img.naturalWidth, nh = img.naturalHeight;
+      if (cr) c.drawImage(img, cr.x * nw, cr.y * nh, cr.w * nw, cr.h * nh, it.x, it.y, it.w, it.h);
+      else c.drawImage(img, it.x, it.y, it.w, it.h);
       break;
     }
     case 'emoji': c.font = `${it.h * 0.82}px ${EMOJI_FONT}`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(it.char, it.x + it.w / 2, it.y + it.h / 2 + it.h * 0.05); break;
@@ -734,8 +964,23 @@ function render() {
   if (cpState) positionCommentPop();
   $('#zoomPct').textContent = Math.round(z * 100) + '%';
 }
+function cropHandles() {
+  const r = S.crop.r, a = toScreen(r.x, r.y), w = r.w * S.view.z, h = r.h * S.view.z;
+  return [['nw', a.x, a.y], ['n', a.x + w / 2, a.y], ['ne', a.x + w, a.y], ['e', a.x + w, a.y + h / 2], ['se', a.x + w, a.y + h], ['s', a.x + w / 2, a.y + h], ['sw', a.x, a.y + h], ['w', a.x, a.y + h / 2]];
+}
+const cropHandleAt = p => (cropHandles().find(([, x, y]) => Math.abs(p.x - x) <= 9 && Math.abs(p.y - y) <= 9) || [])[0] || null;
+function drawCropOverlay() {
+  const r = S.crop.r, a = toScreen(r.x, r.y), w = r.w * S.view.z, h = r.h * S.view.z;
+  ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.beginPath();
+  for (let k = 1; k < 3; k++) { ctx.moveTo(a.x + w * k / 3, a.y); ctx.lineTo(a.x + w * k / 3, a.y + h); ctx.moveTo(a.x, a.y + h * k / 3); ctx.lineTo(a.x + w, a.y + h * k / 3); }
+  ctx.stroke(); ctx.setLineDash([]);
+  ctx.strokeStyle = ACC; ctx.lineWidth = 2; ctx.strokeRect(a.x, a.y, w, h);
+  ctx.fillStyle = '#fff'; ctx.lineWidth = 1.5;
+  for (const [, x, y] of cropHandles()) { ctx.beginPath(); ctx.rect(x - 5, y - 5, 10, 10); ctx.fill(); ctx.stroke(); }
+}
 function drawOverlay() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (S.crop) return drawCropOverlay();
   const z = S.view.z;
   const outline = (b, color, dash, lw = 1.5) => {
     const s = toScreen(b.x, b.y); ctx.strokeStyle = color; ctx.lineWidth = lw; ctx.setLineDash(dash || []);
@@ -1036,9 +1281,9 @@ document.addEventListener('copy', e => { if (isTyping(e.target) || !S.sel.size) 
 document.addEventListener('cut', e => { if (isTyping(e.target) || !S.sel.size) return; const t = doCopy(); if (t) { e.clipboardData.setData('text/plain', t); e.preventDefault(); deleteSelection(); } });
 document.addEventListener('paste', e => {
   if (isTyping(e.target)) return; e.preventDefault();
-  const files = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith('image/'));
+  const files = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith('image/') || isPdf(f));
   const at = mouse.inside ? toWorld(mouse.x, mouse.y) : viewCenter();
-  if (files.length) { files.forEach((f, i) => addImageFile(f, {x: at.x + i * 30, y: at.y + i * 30})); return; }
+  if (files.length) { files.forEach((f, i) => isPdf(f) ? addPdfFile(f, at) : addImageFile(f, {x: at.x + i * 30, y: at.y + i * 30})); return; }
   const t = e.clipboardData?.getData('text/plain') || '';
   if (clip && (t === clip.text || !t)) return pasteClip();
   if (t.trim()) {
@@ -1079,12 +1324,113 @@ function addImageFile(file, at) {
   r.readAsDataURL(file);
 }
 
+/* ---------------- Recortar imágenes ---------------- */
+function cropFull(it) { const c = it.crop || {x: 0, y: 0, w: 1, h: 1}, fw = it.w / c.w, fh = it.h / c.h; return {x: it.x - c.x * fw, y: it.y - c.y * fh, w: fw, h: fh}; }
+function startCrop(it) {
+  if (!it || it.type !== 'image') return;
+  if (it.locked) return toast('La imagen está bloqueada');
+  if (it.rot) return toast('Endereza la imagen (rotación 0°) para recortarla');
+  commitEdit(); setToolQuiet('select');
+  S.crop = {id: it.id, full: cropFull(it), r: {x: it.x, y: it.y, w: it.w, h: it.h}};
+  S.sel = new Set([it.id]); $('#cropBar').classList.add('open'); updatePanel(); requestRender();
+}
+function endCrop() { S.crop = null; $('#cropBar').classList.remove('open'); requestRender(); }
+function applyCrop() {
+  const st = S.crop, it = st && byId(st.id); if (!it) return endCrop();
+  const {full: f, r} = st, c = {x: (r.x - f.x) / f.w, y: (r.y - f.y) / f.h, w: r.w / f.w, h: r.h / f.h};
+  endCrop();
+  mutate(() => {
+    Object.assign(it, {x: r.x, y: r.y, w: r.w, h: r.h});
+    if (c.x < 1e-4 && c.y < 1e-4 && c.w > 0.9999 && c.h > 0.9999) delete it.crop; else it.crop = c;
+  });
+}
+$('#cropApply').onclick = applyCrop; $('#cropCancel').onclick = endCrop;
+$('#cropReset').onclick = () => { if (S.crop) { S.crop.r = {...S.crop.full}; requestRender(); } };
+
+/* ---------------- Insertar PDF (cada página como imagen) ---------------- */
+const isPdf = f => f && (f.type === 'application/pdf' || /\.pdf$/i.test(f.name || ''));
+let pdfjsReady = null;
+function loadPdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (!pdfjsReady) pdfjsReady = new Promise((res, rej) => {
+    const load = src => new Promise((ok, ko) => { const sc = document.createElement('script'); sc.src = src; sc.onload = ok; sc.onerror = () => ko(new Error(src)); document.head.appendChild(sc); });
+    // Se carga también el «worker» como script normal: así pdf.js trabaja sin servidor (file://).
+    load('vendor/pdfjs/pdf.worker.min.js').then(() => load('vendor/pdfjs/pdf.min.js')).then(() => {
+      const L = window.pdfjsLib || window['pdfjs-dist/build/pdf'];
+      L.GlobalWorkerOptions.workerSrc = 'vendor/pdfjs/pdf.worker.min.js'; res(L);
+    }).catch(e => { pdfjsReady = null; rej(e); });
+  });
+  return pdfjsReady;
+}
+async function addPdfFile(file, at) {
+  let L;
+  try { L = await loadPdfJs(); } catch (e) { return toast('No se encontró el lector de PDF (carpeta vendor/pdfjs junto a index.html)'); }
+  try {
+    toast('📄 Abriendo PDF…');
+    const pdf = await L.getDocument({data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false}).promise;
+    const n = pdf.numPages;
+    if (n > 30 && !confirm(`El PDF tiene ${n} páginas. Insertarlas todas puede tardar y ocupar bastante espacio. ¿Continuar?`)) { pdf.destroy(); return; }
+    const before = snapshot(), items = [], W = 600, GAP = 40, PER_ROW = 5;
+    let rowY = 0, rowH = 0;
+    for (let i = 1; i <= n; i++) {
+      toast(`📄 Página ${i} de ${n}…`);
+      const page = await pdf.getPage(i), v1 = page.getViewport({scale: 1}), vp = page.getViewport({scale: Math.min(3, 1600 / v1.width)});
+      const cv = document.createElement('canvas'); cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height);
+      const cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height);
+      await page.render({canvasContext: cx, viewport: vp}).promise; page.cleanup();
+      const aid = 'a' + uid(); S.assets[aid] = cv.toDataURL('image/jpeg', 0.88);
+      const col = (i - 1) % PER_ROW; if (col === 0 && i > 1) { rowY += rowH + GAP; rowH = 0; }
+      const h = W * vp.height / vp.width; rowH = Math.max(rowH, h);
+      items.push({id: uid(), type: 'image', x: col * (W + GAP), y: rowY, w: W, h, asset: aid});
+    }
+    pdf.destroy();
+    const b = unionBounds(items.map(bounds)), c = at || viewCenter();
+    items.forEach(it => { it.x += c.x - b.x - b.w / 2; it.y += c.y - b.y - b.h / 2; });
+    addItems(items); S.sel = new Set(items.map(i => i.id)); pushUndo(before); changed(); setTool('select');
+    animateView(viewFor(unionBounds(items.map(bounds)), 80, 1));
+    toast(`✓ ${n} página${n > 1 ? 's' : ''} insertada${n > 1 ? 's' : ''}`);
+  } catch (e) { console.error(e); toast('No se pudo leer el PDF' + (e && e.name === 'PasswordException' ? ' (está protegido con contraseña)' : '')); }
+}
+
+/* ---------------- Copiar formato ---------------- */
+const STYLE_KEYS = ['fill', 'stroke', 'strokeWidth', 'dash', 'color', 'fontSize', 'bold', 'italic', 'underline', 'strike', 'align', 'valign', 'font', 'opacity', 'style', 'startArrow', 'endArrow'];
+let styleClip = null;
+function copyStyle() {
+  const it = selectedItems()[0]; if (!it) return toast('Selecciona el elemento cuyo formato quieres copiar');
+  styleClip = {opacity: it.opacity ?? 1};
+  for (const k of STYLE_KEYS) if (it[k] !== undefined) styleClip[k] = clone(it[k]);
+  S.painter = true; updateCursor(); updatePanel();
+  toast('🖌 Formato copiado: haz clic en otro elemento (Shift+clic para varios) · Esc para terminar');
+}
+function pasteStyle(targets) {
+  if (!styleClip) return toast('Primero copia un formato (Ctrl+Alt+C)');
+  targets = targets.filter(i => i && !i.locked); if (!targets.length) return;
+  mutate(() => targets.forEach(it => {
+    const t = typeKey(it);
+    for (const [k, v] of Object.entries(styleClip)) {
+      if (k !== 'opacity' && !PROP_TYPES[k]?.includes(t)) continue;
+      if (k === 'fontSize' && v === 'auto' && !['sticky', 'shape'].includes(t)) continue;
+      it[k] = clone(v); stripRuns(it, k);
+    }
+    if (it.type === 'text') fitTextHeight(it);
+  }));
+}
+
 /* ---------------- Edición de texto ---------------- */
 let editBefore = null, editCreated = false, editOrig = '';
+const richEd = $('#richEditor');
+const richSig = it => JSON.stringify([it.text || '', it.rich || null]);
 function startEdit(it, createdBefore) {
   if (!it || it.locked || !hasText(it)) return;
   commitEdit();
   S.editingId = it.id; editCreated = !!createdBefore; editBefore = createdBefore || snapshot();
+  if (RICH_TYPES.has(it.type)) {
+    editOrig = richSig(it); richEd.innerHTML = richToHtml(it); richEd.style.display = 'block';
+    $('#richBar').classList.add('open'); positionEditor(); richEd.focus();
+    const rg = document.createRange(); rg.selectNodeContents(richEd); rg.collapse(false);
+    const sl = getSelection(); sl.removeAllRanges(); sl.addRange(rg);
+    updateRichBar(); requestRender(); return;
+  }
   const k = textKey(it); editOrig = it[k] || ''; editor.value = editOrig;
   editor.style.display = 'block'; positionEditor();
   editor.focus(); editor.setSelectionRange(editor.value.length, editor.value.length);
@@ -1094,20 +1440,86 @@ function startEdit(it, createdBefore) {
 function positionEditor() {
   const it = byId(S.editingId); if (!it) { S.editingId = null; editor.style.display = 'none'; return; }
   const z = S.view.z, box = textBox(it), size = fontSizeFor(it, box), s = toScreen(box.x, box.y);
-  const bold = it.type === 'frame' ? true : it.bold;
+  const bold = it.type === 'frame' ? true : it.bold, rich = RICH_TYPES.has(it.type), ed = rich ? richEd : editor;
   let padTop = 0;
-  if (box.valign !== 'top') { const lines = wrap(editor.value || ' ', size, box.w, bold, it.italic, it.font), free = Math.max(0, box.h - lines.length * size * LH); padTop = box.valign === 'bottom' ? free : free / 2; }
-  Object.assign(editor.style, {
+  if (box.valign !== 'top') {
+    const n = rich ? layoutRich(it, size, box.w).length : wrap(editor.value || ' ', size, box.w, bold, it.italic, it.font).length;
+    const free = Math.max(0, box.h - n * size * LH); padTop = box.valign === 'bottom' ? free : free / 2;
+  }
+  Object.assign(ed.style, {
     left: s.x + 'px', top: s.y + 'px', width: box.w * z + 2 + 'px', height: Math.max(box.h, size * LH) * z + 'px',
-    fontSize: size * z + 'px', paddingTop: padTop * z + 'px', textAlign: it.type === 'frame' ? 'left' : (it.type === 'connector' ? 'center' : it.align || 'center'),
+    fontSize: size * z + 'px', paddingTop: padTop * z + 'px', textAlign: it.type === 'frame' ? 'left' : (it.type === 'connector' ? 'center' : it.align || (it.type === 'text' ? 'left' : 'center')),
     fontWeight: bold ? 700 : 400, fontStyle: it.italic ? 'italic' : 'normal', fontFamily: it.type === 'frame' ? FONT : famCss(it.font),
     textDecoration: [it.underline && 'underline', it.strike && 'line-through'].filter(Boolean).join(' ') || 'none',
-    color: it.type === 'frame' ? (S.dark ? '#ddd' : '#333') : it.type === 'sticky' ? (it.color || '#1a1a1a') : it.type === 'connector' ? (it.color || it.stroke) : (it.color || '#1a1a1a'),
+    color: it.type === 'frame' ? (S.dark ? '#ddd' : '#333') : it.type === 'connector' ? (it.color || it.stroke) : (it.color || defaultTextColor(it)),
     background: it.type === 'connector' || it.type === 'frame' ? bgColor() : 'transparent'
   });
   const rot = it.rot && ROTATABLE.has(it.type) ? it.rot : 0, cc = toScreen(it.x + (it.w || 0) / 2, it.y + (it.h || 0) / 2);
-  editor.style.transformOrigin = `${cc.x - s.x}px ${cc.y - s.y}px`; editor.style.transform = rot ? `rotate(${rot}rad)` : 'none';
+  ed.style.transformOrigin = `${cc.x - s.x}px ${cc.y - s.y}px`; ed.style.transform = rot ? `rotate(${rot}rad)` : 'none';
+  if (rich) richEd.classList.toggle('al-left', ed.style.textAlign === 'left');
+  if (rich) { // barra de formato encima del texto
+    const bar = $('#richBar'), r = ed.getBoundingClientRect(), bw = bar.offsetWidth || 420, bh = bar.offsetHeight || 40;
+    let top = r.top - bh - 12; if (top < 60) top = Math.min(r.bottom + 12, innerHeight - bh - 10);
+    bar.style.left = clamp(r.left + r.width / 2 - bw / 2, 10, innerWidth - bw - 10) + 'px'; bar.style.top = top + 'px';
+  }
 }
+function richInput() {
+  const it = byId(S.editingId); if (!it || !RICH_TYPES.has(it.type)) return;
+  richEd.querySelectorAll('ul.check > li:not([data-checked])').forEach(li => li.dataset.checked = '0');
+  const rich = domToRich(richEd, it); it.text = richPlain(rich);
+  if (isPlainRich(rich)) delete it.rich; else it.rich = rich;
+  if (it.type === 'text') fitTextHeight(it);
+  positionEditor(); requestRender(); updateRichBar();
+}
+richEd.addEventListener('input', richInput);
+richEd.addEventListener('keydown', e => {
+  e.stopPropagation();
+  if (e.key === 'Escape') { e.preventDefault(); commitEdit(); }
+  else if (e.key === 'Tab') { e.preventDefault(); commitEdit(); mindmapChild(e.shiftKey); }
+  else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); commitEdit(); }
+  else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === 'KeyX') { e.preventDefault(); richCmd('strikeThrough'); }
+});
+richEd.addEventListener('paste', e => { e.preventDefault(); document.execCommand('insertText', false, e.clipboardData.getData('text/plain')); });
+richEd.addEventListener('blur', () => commitEdit());
+richEd.addEventListener('click', e => { // marcar / desmarcar casillas mientras se edita
+  const li = e.target.closest && e.target.closest('ul.check > li');
+  if (li && (e.offsetX < 0 || (!richEd.classList.contains('al-left') && clickOnMarker(li, e)))) { li.dataset.checked = li.dataset.checked === '1' ? '0' : '1'; richInput(); }
+});
+function clickOnMarker(li, e) { // ¿clic sobre el ☐ (primer carácter visual del li)?
+  const r = document.createRange(), t = li.firstChild; if (!t) return false;
+  r.setStart(li, 0); r.setEnd(li, 0); const b = r.getBoundingClientRect(), fs = parseFloat(getComputedStyle(li).fontSize);
+  return e.clientX < b.left && e.clientX > b.left - fs * 1.6;
+}
+function closestList() {
+  const sl = getSelection(); if (!sl.rangeCount) return null;
+  let n = sl.anchorNode; if (n && n.nodeType === 3) n = n.parentElement;
+  const l = n && n.closest ? n.closest('ul,ol') : null; return l && richEd.contains(l) ? l : null;
+}
+function richCmd(cmd, val) {
+  richEd.focus(); document.execCommand('styleWithCSS', false, true);
+  const L = closestList(), isCheck = L && L.tagName === 'UL' && L.classList.contains('check');
+  if (cmd === 'check') {
+    if (isCheck) document.execCommand('insertUnorderedList');
+    else {
+      if (!L || L.tagName === 'OL') document.execCommand('insertUnorderedList');
+      const u = closestList(); if (u) { u.classList.add('check'); u.querySelectorAll('li').forEach(li => { if (!li.dataset.checked) li.dataset.checked = '0'; }); }
+    }
+  } else if (cmd === 'ul') { if (isCheck) { L.classList.remove('check'); L.querySelectorAll('li').forEach(li => delete li.dataset.checked); } else document.execCommand('insertUnorderedList'); }
+  else if (cmd === 'ol') document.execCommand('insertOrderedList');
+  else if (cmd === 'color') document.execCommand('foreColor', false, val);
+  else document.execCommand(cmd);
+  richInput();
+}
+function updateRichBar() {
+  if (!S.editingId) return;
+  for (const c of ['bold', 'italic', 'underline', 'strikeThrough']) $(`#richBar [data-rc=${c}]`).classList.toggle('active', document.queryCommandState(c));
+  const L = closestList(), k = !L ? '' : L.tagName === 'OL' ? 'ol' : L.classList.contains('check') ? 'check' : 'ul';
+  for (const c of ['ul', 'ol', 'check']) $(`#richBar [data-rc=${c}]`).classList.toggle('active', k === c);
+}
+document.addEventListener('selectionchange', () => { if (S.editingId && document.activeElement === richEd) updateRichBar(); });
+$('#richColors').innerHTML = TEXT_COLORS.slice(0, 9).map(c => `<button class="rsw" data-rc="color" data-v="${c}" style="background:${c}" title="Color del texto"></button>`).join('');
+$('#richBar').addEventListener('mousedown', e => e.preventDefault()); // no quitar el foco al texto
+$('#richBar').addEventListener('click', e => { const b = e.target.closest('[data-rc]'); if (b) richCmd(b.dataset.rc, b.dataset.v); });
 editor.addEventListener('input', () => {
   const it = byId(S.editingId); if (!it) return;
   it[textKey(it)] = editor.value;
@@ -1124,11 +1536,12 @@ editor.addEventListener('keydown', e => {
 editor.addEventListener('blur', () => commitEdit());
 function commitEdit() {
   if (!S.editingId) return;
-  const it = byId(S.editingId); S.editingId = null; editor.style.display = 'none';
+  const it = byId(S.editingId); S.editingId = null; editor.style.display = 'none'; richEd.style.display = 'none'; $('#richBar').classList.remove('open');
   if (document.activeElement === editor) editor.blur();
+  if (document.activeElement === richEd) richEd.blur();
   if (!it) return;
-  const val = it[textKey(it)] || '';
-  if (it.type === 'text' && !val.trim()) {
+  const val = RICH_TYPES.has(it.type) ? richSig(it) : it[textKey(it)] || '';
+  if (it.type === 'text' && !(it.text || '').trim()) {
     if (editCreated) { S.items = JSON.parse(editBefore); reindex(); S.sel.clear(); changed(); return; }
     removeItems([it.id]); pushUndo(editBefore); changed(); return;
   }
@@ -1145,7 +1558,7 @@ function mindmapChild(sibling) {
   const b = bounds(p); let nx = b.x + b.w + 120, ny = b.y;
   if (kids.length) { const last = kids.reduce((a, k) => k.y + k.h > a.y + a.h ? k : a); ny = last.y + last.h + 30; nx = last.x; }
   const before = snapshot();
-  const child = clone(p); Object.assign(child, {id: uid(), x: nx, y: ny, text: ''}); delete child.groupId; delete child.locked; delete child.link; delete child.rot;
+  const child = clone(p); Object.assign(child, {id: uid(), x: nx, y: ny, text: ''}); delete child.groupId; delete child.locked; delete child.link; delete child.rot; delete child.rich;
   if (child.type === 'text') fitTextHeight(child);
   const conn = mk('connector', {from: {id: p.id, x: 0, y: 0}, to: {id: child.id, x: 0, y: 0}});
   addItems([child, conn]); S.sel = new Set([child.id]); changed();
@@ -1168,7 +1581,7 @@ const TOOLS = [
   {id: 'frame', key: 'F', name: 'Marco', icon: ICON('<path d="M7 3v18M17 3v18M3 7h18M3 17h18"/>')},
   {id: 'emoji', key: 'S', name: 'Sellos / reacciones', icon: ICON('<circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9.5h.01M15 9.5h.01"/>')},
   {id: 'comment', key: 'C', name: 'Comentario', icon: ICON('<path d="M4 5h16v11H10l-6 4z"/><path d="M8 9h8M8 12h5"/>')},
-  {id: 'image', key: 'I', name: 'Imagen', icon: ICON('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 17l-5-5-9 8"/>'), action: true},
+  {id: 'image', key: 'I', name: 'Imagen o PDF', icon: ICON('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 17l-5-5-9 8"/>'), action: true},
   '-',
   {id: 'templates', key: '', name: 'Plantillas', icon: ICON('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'), action: true}
 ];
@@ -1189,6 +1602,7 @@ function setTool(t) {
 }
 function updateCursor() {
   const t = S.tool;
+  if (S.painter && t === 'select' && !spaceDown) { canvas.style.cursor = 'copy'; return; }
   canvas.style.cursor = spaceDown || t === 'hand' ? (drag && drag.mode === 'pan' ? 'grabbing' : 'grab') : t === 'select' ? 'default' : t === 'text' ? 'text' : t === 'eraser' ? 'cell' : 'crosshair';
 }
 
@@ -1211,6 +1625,13 @@ canvas.addEventListener('pointerdown', e => {
   if (S.presenting) { drag = {mode: 'pan', sx: p.x, sy: p.y, vx: S.view.x, vy: S.view.y}; return; }
   if (e.button === 1 || S.tool === 'hand' || spaceDown || (e.button === 2)) {
     drag = {mode: 'pan', sx: p.x, sy: p.y, vx: S.view.x, vy: S.view.y, right: e.button === 2}; updateCursor(); return;
+  }
+  if (S.crop) {
+    const r = S.crop.r, hd = cropHandleAt(p);
+    if (hd) drag = {mode: 'crop', dir: hd};
+    else if (w.x >= r.x && w.x <= r.x + r.w && w.y >= r.y && w.y <= r.y + r.h) drag = {mode: 'cropmove', start: w, r0: {...r}};
+    else applyCrop();
+    requestRender(); return;
   }
   const before = snapshot();
   switch (S.tool) {
@@ -1251,6 +1672,12 @@ canvas.addEventListener('pointerdown', e => {
 function setToolQuiet(t) { S.tool = t; document.querySelectorAll('#toolbar [data-tool]').forEach(b => b.classList.toggle('active', b.dataset.tool === t)); updateCursor(); }
 
 function selectDown(e, w, p) {
+  if (S.painter) { // pintor de formato
+    const t = hitItem(w);
+    if (t) pasteStyle([...expandGroups([t.id])].map(byId).filter(Boolean));
+    if (!t || !e.shiftKey) { S.painter = false; updateCursor(); }
+    return;
+  }
   const h = hitHandle(p);
   if (h) {
     const before = snapshot();
@@ -1268,6 +1695,7 @@ function selectDown(e, w, p) {
   const it = hitItem(w);
   if (it) {
     if ((e.ctrlKey || e.metaKey) && it.link) { window.open(it.link, '_blank', 'noopener'); return; }
+    if (!e.shiftKey && !e.altKey && !it.locked) { const para = checkAt(it, w); if (para) { mutate(() => { para.c = !para.c; }); return; } }
     const targets = expandGroups([it.id]);
     if (e.shiftKey) { const on = S.sel.has(it.id); for (const id of targets) on ? S.sel.delete(id) : S.sel.add(id); updatePanel(); if (on) return; }
     else if (!S.sel.has(it.id)) { S.sel = targets; updatePanel(); }
@@ -1368,6 +1796,17 @@ canvas.addEventListener('pointermove', e => {
       Object.assign(it, {x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.max(1, Math.abs(x1 - x0)), h: Math.max(1, Math.abs(y1 - y0))});
       break;
     }
+    case 'crop': {
+      const {full: f, r} = S.crop, d = drag.dir, M = 10 / z;
+      let x0 = r.x, y0 = r.y, x1 = r.x + r.w, y1 = r.y + r.h;
+      if (d.includes('w')) x0 = clamp(w.x, f.x, x1 - M); if (d.includes('e')) x1 = clamp(w.x, x0 + M, f.x + f.w);
+      if (d.includes('n')) y0 = clamp(w.y, f.y, y1 - M); if (d.includes('s')) y1 = clamp(w.y, y0 + M, f.y + f.h);
+      S.crop.r = {x: x0, y: y0, w: x1 - x0, h: y1 - y0}; break;
+    }
+    case 'cropmove': {
+      const {full: f} = S.crop, r0 = drag.r0;
+      S.crop.r = {...r0, x: clamp(r0.x + w.x - drag.start.x, f.x, f.x + f.w - r0.w), y: clamp(r0.y + w.y - drag.start.y, f.y, f.y + f.h - r0.h)}; break;
+    }
     case 'pen': { const l = drag.pts[drag.pts.length - 1]; if (Math.hypot(w.x - l[0], w.y - l[1]) * z > 1.5) drag.pts.push([w.x, w.y]); break; }
     case 'erase': eraseAt(w); break;
     case 'conn': case 'connEnd': {
@@ -1382,10 +1821,15 @@ canvas.addEventListener('pointermove', e => {
 });
 function hoverUpdate(p, w) {
   let cur = null, hv = null;
+  if (S.crop) {
+    const r = S.crop.r, hd = cropHandleAt(p);
+    canvas.style.cursor = hd ? CURSORS[hd] : (w.x >= r.x && w.x <= r.x + r.w && w.y >= r.y && w.y <= r.y + r.h ? 'move' : 'default'); return;
+  }
+  if (S.painter && S.tool === 'select') { const it = hitItem(w); hv = it ? it.id : null; canvas.style.cursor = 'copy'; if (hv !== S.hover) { S.hover = hv; requestRender(); } return; }
   if (S.tool === 'select' && !spaceDown) {
     const h = hitHandle(p);
     if (h) cur = h.type === 'resize' ? cursorFor(h.dir) : h.type === 'rotate' ? 'grab' : 'pointer';
-    else { const it = hitItem(w); hv = it ? it.id : null; cur = it ? (it.locked ? 'default' : 'move') : 'default'; if (it && (it.link || it.type === 'comment')) cur = 'pointer'; }
+    else { const it = hitItem(w); hv = it ? it.id : null; cur = it ? (it.locked ? 'default' : 'move') : 'default'; if (it && (it.link || it.type === 'comment' || checkAt(it, w))) cur = 'pointer'; }
     canvas.style.cursor = cur;
   } else if (S.tool === 'connector') {
     const it = hitItem(w, {noConn: true, connTarget: true}); const id = it ? it.id : null;
@@ -1480,6 +1924,7 @@ canvas.addEventListener('dblclick', e => {
   if (it) {
     if (hasText(it)) { S.sel = new Set([it.id]); startEdit(it); }
     else if (it.type === 'frame') startEdit(it);
+    else if (it.type === 'image') startCrop(it);
     return;
   }
   if (S.tool !== 'select') return;
@@ -1621,7 +2066,8 @@ function actionsHtml(items) {
   if (items.length === 1 && ['sticky', 'shape', 'text'].includes(items[0].type)) h += `<div class="sec"><button class="bt" data-act="child" title="Tab">🧠 Añadir rama de mapa mental (Tab)</button></div>`;
   if (items.length === 1 && items[0].type === 'sticky') h += `<div class="sec"><button class="bt" data-act="toshape">▭ Convertir en forma</button></div>`;
   if (items.length === 1 && items[0].type === 'shape') h += `<div class="sec"><button class="bt" data-act="tosticky">🗒 Convertir en nota</button></div>`;
-  if (items.length === 1 && items[0].type === 'image') h += `<div class="sec"><button class="bt" data-act="natsize">↺ Tamaño original</button></div>`;
+  if (items.length === 1 && items[0].type === 'image') h += `<div class="sec btns"><button class="bt" data-act="crop" title="También con doble clic">✂ Recortar</button>${items[0].crop ? '<button class="bt" data-act="uncrop">Quitar recorte</button>' : ''}<button class="bt" data-act="natsize">↺ Tamaño original</button></div>`;
+  h += `<div class="sec btns"><button class="bt" data-act="copystyle" title="Ctrl+Alt+C. Después haz clic en otro elemento (Shift+clic para varios)">🖌 Copiar formato</button>${styleClip ? '<button class="bt" data-act="pastestyle" title="Ctrl+Alt+V">Pegar formato</button>' : ''}</div>`;
   if (multi) h += sec('Alinear y distribuir', `<div class="btns">
     <button class="bt" data-act="alignL" title="Izquierda">⇤</button><button class="bt" data-act="alignC" title="Centro horizontal">⇹</button><button class="bt" data-act="alignR" title="Derecha">⇥</button>
     <button class="bt" data-act="alignT" title="Arriba">⤒</button><button class="bt" data-act="alignM" title="Centro vertical">⇳</button><button class="bt" data-act="alignB" title="Abajo">⤓</button>
@@ -1639,6 +2085,7 @@ function applyProp(key, val, merge) {
         const t = typeKey(it);
         if (!(key === 'opacity' || key === 'link' || PROP_TYPES[key]?.includes(t))) continue;
         if ((key === 'link' || key === 'rot') && !val) delete it[key]; else it[key] = val;
+        stripRuns(it, key);
         if (t === 'text' && ['fontSize', 'bold', 'italic', 'font'].includes(key)) fitTextHeight(it);
         if (S.defaults[t] && key in S.defaults[t] && key !== 'text') S.defaults[t][key] = val;
       }
@@ -1693,7 +2140,11 @@ function doAction(a) {
     case 'rot90': case 'rotm90': case 'rot0': mutate(() => sel.forEach(i => { if (!ROTATABLE.has(i.type) || i.locked) return; const r = a === 'rot0' ? 0 : normAng((i.rot || 0) + (a === 'rot90' ? 1 : -1) * Math.PI / 2); if (Math.abs(r) < 1e-4) delete i.rot; else i.rot = r; })); break;
     case 'toshape': mutate(() => { const s = sel[0]; Object.assign(s, {type: 'shape', shape: 'rect', stroke: 'transparent', strokeWidth: 0, fontSize: 16}); }); break;
     case 'tosticky': mutate(() => { const s = sel[0]; s.type = 'sticky'; if (!s.fill || s.fill === 'transparent' || s.fill === '#ffffff') s.fill = '#fff9b1'; s.fontSize = 'auto'; s.w = s.h = Math.max(s.w, s.h); }); break;
-    case 'natsize': { const it = sel[0], img = getImg(it.asset); if (img && img.naturalWidth) mutate(() => { it.w = img.naturalWidth; it.h = img.naturalHeight; }); break; }
+    case 'natsize': { const it = sel[0], img = getImg(it.asset), cr = it.crop || {w: 1, h: 1}; if (img && img.naturalWidth) mutate(() => { it.w = img.naturalWidth * cr.w; it.h = img.naturalHeight * cr.h; }); break; }
+    case 'crop': startCrop(sel[0]); break;
+    case 'uncrop': { const it = sel[0], f = cropFull(it); mutate(() => { Object.assign(it, f); delete it.crop; }); break; }
+    case 'copystyle': copyStyle(); break;
+    case 'pastestyle': pasteStyle(sel); break;
     case 'grid': {
       const list = sel.filter(i => i.type !== 'connector' && !i.locked).sort((a, b) => a.y - b.y || a.x - b.x); if (list.length < 2) break;
       const box = unionBounds(list.map(bounds)), cols = Math.ceil(Math.sqrt(list.length)), cw = Math.max(...list.map(i => i.w)), chh = Math.max(...list.map(i => i.h)), gap = 20;
@@ -1708,6 +2159,9 @@ window.addEventListener('keydown', e => {
   if (isTyping(e.target)) { if (e.key === 'Escape' && e.target.id === 'searchInput') closeSearch(); return; }
   if (e.key === ' ') { if (!spaceDown) { spaceDown = true; updateCursor(); } e.preventDefault(); return; }
   if ($('#modalBg').classList.contains('open')) { if (e.key === 'Escape') closeModal(); return; }
+  if (S.crop) { if (e.key === 'Enter') { e.preventDefault(); applyCrop(); } else if (e.key === 'Escape') endCrop(); return; }
+  if (S.painter && e.key === 'Escape') { S.painter = false; updateCursor(); toast('Pintor de formato desactivado'); return; }
+  if ((e.ctrlKey || e.metaKey) && e.altKey && (e.code === 'KeyC' || e.code === 'KeyV')) { e.preventDefault(); e.code === 'KeyC' ? copyStyle() : pasteStyle(selectedItems()); return; }
   if (S.presenting) {
     if (['ArrowRight', 'ArrowDown', 'PageDown', 'Enter'].includes(e.key)) { goFrame(S.presenting.i + 1); e.preventDefault(); }
     else if (['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace'].includes(e.key)) { goFrame(S.presenting.i - 1); e.preventDefault(); }
@@ -1792,7 +2246,7 @@ $('#exportMenu').addEventListener('click', e => {
   ({png: () => exportPNG(false), pngsel: () => exportPNG(true), svg: exportSVG, pdf: printPDF, json: exportJSON, import: () => $('#fileJson').click(), insertimg: () => $('#fileImg').click()})[b.dataset.ex]();
 });
 $('#templateMenu').addEventListener('click', e => { const b = e.target.closest('[data-tpl]'); if (!b) return; closeMenus(); insertTemplate(b.dataset.tpl); });
-$('#fileImg').addEventListener('change', e => { const c = viewCenter(); [...e.target.files].forEach((f, i) => addImageFile(f, {x: c.x + i * 40, y: c.y + i * 40})); e.target.value = ''; });
+$('#fileImg').addEventListener('change', async e => { const c = viewCenter(), files = [...e.target.files]; e.target.value = ''; for (const [i, f] of files.entries()) { if (isPdf(f)) await addPdfFile(f, c); else addImageFile(f, {x: c.x + i * 40, y: c.y + i * 40}); } });
 $('#fileJson').addEventListener('change', async e => { for (const f of e.target.files) await importJSONFile(f); e.target.value = ''; });
 
 /* ---------------- Arrastrar y soltar archivos ---------------- */
@@ -1805,6 +2259,7 @@ window.addEventListener('drop', async e => {
   const w = toWorld(e.clientX, e.clientY); let i = 0;
   for (const f of e.dataTransfer.files) {
     if (f.type.startsWith('image/')) addImageFile(f, {x: w.x + i * 40, y: w.y + i * 40}), i++;
+    else if (isPdf(f)) await addPdfFile(f, w);
     else if (f.name.endsWith('.json')) await importJSONFile(f);
   }
   const url = e.dataTransfer.getData('text/uri-list') || '';
@@ -1853,6 +2308,26 @@ function exportSVG() {
     const x = al === 'left' ? box.x : al === 'right' ? box.x + box.w : box.x + box.w / 2, anchor = al === 'left' ? 'start' : al === 'right' ? 'end' : 'middle';
     return lines.map((l, i) => `<text x="${X(x)}" y="${X(y0 + lh * i + lh / 2)}" font-size="${X(size)}" fill="${o.color || '#1a1a1a'}" text-anchor="${anchor}" dominant-baseline="central"${o.bold ? ' font-weight="700"' : ''}${o.italic ? ' font-style="italic"' : ''}${o.font ? ` font-family="${esc(famCss(o.font))}"` : ''}${deco ? ` text-decoration="${deco}"` : ''}>${esc(l)}</text>`).join('');
   };
+  const richSvg = (it, box, size) => {
+    const base = it.color || defaultTextColor(it), fam = esc(famCss(it.font)), o = [];
+    for (const {l, x, ly} of richGeom(it, box, size)) {
+      const done = l.k === 'check' && l.para.c;
+      if (l.marker) {
+        if (l.marker.check !== undefined) {
+          const q = size * 0.8, bx = x - size * 1.15, by = ly - q / 2;
+          o.push(l.marker.check ? `<rect x="${X(bx)}" y="${X(by)}" width="${X(q)}" height="${X(q)}" fill="${ACC}"/><path d="M${X(bx + q * .22)} ${X(by + q * .52)}L${X(bx + q * .43)} ${X(by + q * .72)}L${X(bx + q * .8)} ${X(by + q * .3)}" stroke="#fff" stroke-width="${X(Math.max(size / 12, .75))}" fill="none" stroke-linecap="round"/>`
+            : `<rect x="${X(bx)}" y="${X(by)}" width="${X(q)}" height="${X(q)}" fill="none" stroke="${base}" stroke-width="${X(Math.max(size / 12, .75))}"/>`);
+        } else o.push(`<text x="${X(x - size * 0.35)}" y="${X(ly)}" font-size="${X(size)}" font-family="${fam}" fill="${base}" text-anchor="end" dominant-baseline="central">${esc(l.marker.t)}</text>`);
+      }
+      let sx = x;
+      for (const sg of l.segs) {
+        const st = sg.st, d = [(st.u ?? it.underline) && 'underline', ((st.s ?? it.strike) || done) && 'line-through'].filter(Boolean).join(' ');
+        if (!sg.sp) o.push(`<text x="${X(sx)}" y="${X(ly)}" font-size="${X(size)}" font-family="${fam}" fill="${done ? '#999999' : st.c || base}" dominant-baseline="central"${(st.b ?? it.bold) ? ' font-weight="700"' : ''}${(st.i ?? it.italic) ? ' font-style="italic"' : ''}${d ? ` text-decoration="${d}"` : ''} xml:space="preserve">${esc(sg.t)}</text>`);
+        sx += sg.w;
+      }
+    }
+    return o.join('');
+  };
   const pathD = (s, x, y, w, h) => {
     const pc = {beginPath() { this.d = ''; }, moveTo(a, b) { this.d += `M${X(a)} ${X(b)}`; }, lineTo(a, b) { this.d += `L${X(a)} ${X(b)}`; }, closePath() { this.d += 'Z'; }, rect(a, b, c, d) { this.d += `M${X(a)} ${X(b)}h${X(c)}v${X(d)}h${X(-c)}Z`; },
       arcTo(x1, y1, x2, y2, r) { this.d += `L${X(x1)} ${X(y1)}`; }, ellipse(cx, cy, rx, ry) { this.d += `M${X(cx - rx)} ${X(cy)}a${X(rx)} ${X(ry)} 0 1 0 ${X(2 * rx)} 0a${X(rx)} ${X(ry)} 0 1 0 ${X(-2 * rx)} 0`; }};
@@ -1867,10 +2342,16 @@ function exportSVG() {
     out.push(`<g${op}${it.rot && ROTATABLE.has(it.type) ? ` transform="rotate(${X(it.rot * 180 / Math.PI)} ${X(it.x + it.w / 2)} ${X(it.y + it.h / 2)})"` : ''}>`);
     switch (it.type) {
       case 'frame': out.push(`<rect x="${X(it.x)}" y="${X(it.y)}" width="${X(it.w)}" height="${X(it.h)}" fill="${it.fill || '#fff'}" stroke="rgba(0,0,0,.2)"/><text x="${X(it.x)}" y="${X(it.y - 14)}" font-size="13" font-weight="700" fill="#555" dominant-baseline="central">${esc(it.title || 'Marco')}</text>`); break;
-      case 'sticky': out.push(`<rect x="${X(it.x)}" y="${X(it.y)}" width="${X(it.w)}" height="${X(it.h)}" fill="${it.fill}" filter="url(#sh)"/>`); if (it.text) { const tb = textBox(it); out.push(txt(it, tb, fontSizeFor(it, tb), {...it, color: it.color || '#1a1a1a', valign: tb.valign})); } break;
-      case 'shape': out.push(`<path d="${pathD(it.shape, it.x, it.y, it.w, it.h)}" fill="${it.fill === 'transparent' ? 'none' : it.fill}" stroke="${it.strokeWidth > 0 ? it.stroke : 'none'}" stroke-width="${it.strokeWidth}" stroke-linejoin="round"${it.dash ? ` stroke-dasharray="${it.strokeWidth * 3} ${it.strokeWidth * 2}"` : ''}/>`); if (it.text) { const tb = textBox(it); out.push(txt(it, tb, fontSizeFor(it, tb), {...it, valign: tb.valign})); } break;
-      case 'text': out.push(txt(it, textBox(it), it.fontSize, {...it, valign: 'top'})); break;
-      case 'image': out.push(`<image x="${X(it.x)}" y="${X(it.y)}" width="${X(it.w)}" height="${X(it.h)}" preserveAspectRatio="none" href="${S.assets[it.asset] || ''}"/>`); break;
+      case 'sticky': out.push(`<rect x="${X(it.x)}" y="${X(it.y)}" width="${X(it.w)}" height="${X(it.h)}" fill="${it.fill}" filter="url(#sh)"/>`); if (it.text || it.rich) { const tb = textBox(it); out.push(richSvg(it, tb, fontSizeFor(it, tb))); } break;
+      case 'shape': out.push(`<path d="${pathD(it.shape, it.x, it.y, it.w, it.h)}" fill="${it.fill === 'transparent' ? 'none' : it.fill}" stroke="${it.strokeWidth > 0 ? it.stroke : 'none'}" stroke-width="${it.strokeWidth}" stroke-linejoin="round"${it.dash ? ` stroke-dasharray="${it.strokeWidth * 3} ${it.strokeWidth * 2}"` : ''}/>`); if (it.text || it.rich) { const tb = textBox(it); out.push(richSvg(it, tb, fontSizeFor(it, tb))); } break;
+      case 'text': out.push(richSvg(it, textBox(it), it.fontSize)); break;
+      case 'image': {
+        const src = S.assets[it.asset] || '', cr = it.crop;
+        if (!cr) { out.push(`<image x="${X(it.x)}" y="${X(it.y)}" width="${X(it.w)}" height="${X(it.h)}" preserveAspectRatio="none" href="${src}"/>`); break; }
+        const img = getImg(it.asset), nw = (img && img.naturalWidth) || 1000, nh = (img && img.naturalHeight) || 1000;
+        out.push(`<svg x="${X(it.x)}" y="${X(it.y)}" width="${X(it.w)}" height="${X(it.h)}" viewBox="${X(cr.x * nw)} ${X(cr.y * nh)} ${X(cr.w * nw)} ${X(cr.h * nh)}" preserveAspectRatio="none"><image width="${nw}" height="${nh}" href="${src}"/></svg>`);
+        break;
+      }
       case 'emoji': out.push(`<text x="${X(it.x + it.w / 2)}" y="${X(it.y + it.h / 2)}" font-size="${X(it.h * 0.82)}" text-anchor="middle" dominant-baseline="central">${it.char}</text>`); break;
       case 'pen': { const P = penPoints(it); out.push(`<polyline points="${P.map(p => X(p.x) + ',' + X(p.y)).join(' ')}" fill="none" stroke="${it.stroke}" stroke-width="${it.strokeWidth}" stroke-linecap="round" stroke-linejoin="round"${it.hl ? ' stroke-opacity=".45"' : ''}/>`); break; }
       case 'connector': {
@@ -2117,7 +2598,7 @@ function showHelp() {
   <div class="cols"><table>
   <tr><td colspan=2><b>Herramientas</b></td></tr>
   ${K('V', 'Seleccionar')}${K('H', 'Mano / mover lienzo')}${K('N', 'Nota adhesiva')}${K('T', 'Texto')}${K('R', 'Rectángulo')}${K('O', 'Elipse')}
-  ${K('L', 'Conector / flecha')}${K('P', 'Lápiz')}${K('M', 'Rotulador')}${K('E', 'Goma')}${K('F', 'Marco')}${K('S', 'Sellos / emojis')}${K('C', 'Comentario')}${K('I', 'Insertar imagen')}
+  ${K('L', 'Conector / flecha')}${K('P', 'Lápiz')}${K('M', 'Rotulador')}${K('E', 'Goma')}${K('F', 'Marco')}${K('S', 'Sellos / emojis')}${K('C', 'Comentario')}${K('I', 'Insertar imagen o PDF')}
   <tr><td colspan=2><b>Navegación</b></td></tr>
   ${K('Rueda', 'Zoom')}${K('Shift Rueda', 'Desplazar horizontal')}${K('Espacio arrastrar', 'Mover lienzo')}${K('Clic-derecho arrastrar', 'Mover lienzo')}
   ${K('Shift 1', 'Ver todo')}${K('Shift 2', 'Ir a la selección')}${K('Ctrl 0', 'Zoom 100%')}${K('Ctrl F', 'Buscar')}${K('G', 'Mostrar/ocultar cuadrícula')}
@@ -2129,7 +2610,7 @@ function showHelp() {
   ${K('Ctrl D', 'Duplicar')}${K('Alt arrastrar', 'Duplicar arrastrando')}${K('Ctrl A', 'Seleccionar todo')}${K('Supr', 'Eliminar')}
   ${K('Ctrl G', 'Agrupar')}${K('Ctrl Shift G', 'Desagrupar')}${K('Ctrl L', 'Bloquear / desbloquear')}${K('Ctrl ] / [', 'Traer al frente / enviar al fondo')}
   ${K('Flechas', 'Mover 1px (Shift: 10px)')}${K('Shift arrastrar', 'Mover en línea recta / proporcional')}${K('Ctrl arrastrar', 'Mover sin guías')}
-  ${K('Ctrl clic', 'Abrir enlace del elemento')}${K('Ctrl S', 'Guardar ahora')}${K('Ctrl E', 'Exportar PNG')}
+  ${K('Ctrl Alt C', 'Copiar formato (pintor)')}${K('Ctrl Alt V', 'Pegar formato en la selección')}${K('Doble-clic imagen', 'Recortar imagen')}${K('Ctrl B / I / U', 'Negrita / cursiva / subrayado (editando)')}${K('Ctrl Shift X', 'Tachado (editando)')}${K('Ctrl clic', 'Abrir enlace del elemento')}${K('Ctrl S', 'Guardar ahora')}${K('Ctrl E', 'Exportar PNG')}
   </table></div>
   <p><b>Consejos:</b> gira cualquier nota, forma, texto, imagen o dibujo con el asa redonda que aparece encima de la selección (Shift = saltos de 15°); los comentarios 💬 se pegan al elemento sobre el que los sueltas y se mueven con él; arrastra desde el borde de un conector para reconectarlo; todo lo que esté dentro de un marco se mueve con él; pega una lista de líneas para crear una nota por línea; arrastra archivos <code>.json</code> para importar tableros.</p>`;
   $('#modalBg').classList.add('open');

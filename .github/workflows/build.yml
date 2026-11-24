@@ -1,6 +1,6 @@
 name: Compilar app de escritorio
 
-# - Cada envío a main: compila para Windows, macOS y Linux (descargas en la pestaña Actions).
+# - Cada envío a main: compila para Windows (descargas en la pestaña Actions).
 # - Al publicar una release en GitHub: además adjunta los instaladores a esa release.
 # - También se puede lanzar a mano desde Actions → Run workflow.
 on:
@@ -16,11 +16,7 @@ permissions:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -28,18 +24,14 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run dist
+      - run: npm run dist:win
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - uses: actions/upload-artifact@v7
         with:
-          name: pizarra-local-${{ matrix.os }}
-          path: |
-            dist/*.exe
-            dist/*.dmg
-            dist/*.AppImage
-            dist/*.deb
-          if-no-files-found: ignore
+          name: pizarra-local-windows
+          path: dist/*.exe
+          if-no-files-found: error
 
   release:
     needs: build

@@ -7,8 +7,6 @@ Pizarra infinita estilo Miro, 100 % local.
 | Opción | Qué hacer |
 |---|---|
 | **Windows** | Ejecuta `PizarraLocal-1.1.0-portable.exe`. No necesita instalación. Windows SmartScreen puede avisar porque la app no está firmada: pulsa *Más información → Ejecutar de todas formas*. |
-| **Linux** | `chmod +x "Pizarra Local-1.1.0.AppImage"` y ejecútalo. |
-| **macOS** | Genera la app en tu Mac (ver abajo). |
 | **Navegador** | Abre `index.html` con doble clic en Chrome, Edge o Firefox. |
 
 La app de escritorio y el navegador guardan los tableros por separado. Para pasar tableros de uno a otro, usa *Guardar copia (.json)* e *Importar*.
@@ -37,5 +35,5 @@ npm run dist       # crea el instalador para tu sistema en la carpeta dist/
 
 ## Descargas automáticas (GitHub Actions)
 
-- **Cada cambio en `main`** compila la app para Windows (instalador y portátil), macOS (`.dmg` para Intel y Apple Silicon) y Linux (`.AppImage` y `.deb`). Los archivos aparecen en la pestaña **Actions**, dentro de la ejecución, en el apartado *Artifacts*.
+- **Cada cambio en `main`** compila la app para Windows: instalador (`Pizarra Local Setup.exe`) y versión portátil (`PizarraLocal-…-portable.exe`). Los archivos aparecen en la pestaña **Actions**, dentro de la ejecución, en el apartado *Artifacts*.
 - **Para publicar una versión** con enlaces de descarga permanentes: ve a **Releases → Draft a new release**, escribe una etiqueta nueva (p. ej. `v1.1.0`) y pulsa **Publish release**. Unos 10 minutos después, los instaladores aparecen adjuntos a la release.

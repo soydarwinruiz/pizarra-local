@@ -90,6 +90,14 @@ body.presenting #presUI{display:flex}
 #timerBtn.run{color:var(--accent);font-weight:700}
 #timerBtn.done{background:#f24726;color:#fff}
 #dropHint{position:fixed;inset:0;border:4px dashed var(--accent);z-index:90;display:none;pointer-events:none;background:rgba(66,98,255,.06)}
+#fontPicker{width:270px;display:none;flex-direction:column;gap:6px}
+#fontPicker.open{display:flex}
+#fontSearch{width:100%;padding:7px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--text);font:inherit;outline:none}
+#fontSearch:focus{border-color:var(--accent)}
+#fontList{overflow:auto;max-height:50vh}
+.fi{padding:6px 8px;cursor:pointer;border-radius:6px;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fi:hover{background:var(--hover)}
+.fi.on{background:var(--accent);color:#fff}
 #cmtBadge{position:absolute;top:2px;right:0;background:#f24726;color:#fff;border-radius:8px;font-size:9px;padding:0 4px;line-height:14px}
 #cmtBadge:empty{display:none}
 #commentPop{width:310px;padding:0;display:none;flex-direction:column;max-height:440px;z-index:30}
@@ -205,6 +213,11 @@ body.presenting #presUI{display:flex}
   <div class="sep"></div><button class="tb" id="presExit" title="Salir (Esc)">✕</button>
 </div>
 
+<div id="fontPicker" class="menu float">
+  <input id="fontSearch" placeholder="Buscar o escribir una fuente…" autocomplete="off">
+  <div id="fontList"></div>
+  <button class="bt" id="fontLoadSys" title="El navegador te pedirá permiso">🔤 Cargar todas las fuentes de mi equipo</button>
+</div>
 <div id="commentPop" class="float ui">
   <div class="cp-head"><b id="cpTitle">Comentario</b><button class="tb" id="cpResolve" title="Marcar como resuelto">✔</button><button class="tb" id="cpDelete" title="Eliminar hilo">🗑</button><button class="tb" id="cpClose" title="Cerrar (Esc)">✕</button></div>
   <div class="cp-msgs" id="cpMsgs"></div>
@@ -263,9 +276,9 @@ const S = {
   grid: true, snap: false, minimap: true, dark: false, guides: [],
   presenting: null, searchHits: [], searchIdx: -1, connHover: null, showComments: true, showResolved: false,
   defaults: {
-    sticky: {fill:'#fff9b1', color:'#1a1a1a', fontSize:'auto', align:'center', bold:false, italic:false},
-    shape: {shape:'rect', fill:'#ffffff', stroke:'#1a1a1a', strokeWidth:2, color:'#1a1a1a', fontSize:16, align:'center', dash:false, bold:false, italic:false},
-    text: {color:'#1a1a1a', fontSize:24, align:'left', bold:false, italic:false},
+    sticky: {fill:'#fff9b1', color:'#1a1a1a', fontSize:'auto', align:'center', bold:false, italic:false, font:''},
+    shape: {shape:'rect', fill:'#ffffff', stroke:'#1a1a1a', strokeWidth:2, color:'#1a1a1a', fontSize:16, align:'center', dash:false, bold:false, italic:false, font:''},
+    text: {color:'#1a1a1a', fontSize:24, align:'left', bold:false, italic:false, font:''},
     pen: {stroke:'#1a1a1a', strokeWidth:3, dash:false},
     highlighter: {stroke:'#fac710', strokeWidth:18},
     connector: {stroke:'#1a1a1a', strokeWidth:2, style:'curved', startArrow:false, endArrow:true, dash:false, color:'#1a1a1a', fontSize:14},
@@ -352,12 +365,13 @@ function changed(panel = true) {
 }
 
 /* ---------------- Texto ---------------- */
-const fontStr = (size, b, i) => `${i ? 'italic ' : ''}${b ? '700' : '400'} ${size}px ${FONT}`;
+const famCss = f => f ? '"' + String(f).replace(/["\\]/g, '') + '", ' + FONT : FONT;
+const fontStr = (size, b, i, f) => `${i ? 'italic ' : ''}${b ? '700' : '400'} ${size}px ${famCss(f)}`;
 const wrapCache = new Map(), fitCache = new Map();
-function wrap(text, size, maxW, b, i) {
-  const key = size + '|' + maxW + '|' + (b ? 1 : 0) + (i ? 1 : 0) + '|' + text;
+function wrap(text, size, maxW, b, i, f) {
+  const key = size + '|' + maxW + '|' + (b ? 1 : 0) + (i ? 1 : 0) + '|' + (f || '') + '|' + text;
   let r = wrapCache.get(key); if (r) return r;
-  mctx.font = fontStr(size, b, i);
+  mctx.font = fontStr(size, b, i, f);
   const W = s => mctx.measureText(s).width, lines = [];
   for (const para of String(text).split('\n')) {
     let line = '';
@@ -375,36 +389,49 @@ function wrap(text, size, maxW, b, i) {
   if (wrapCache.size > 4000) wrapCache.clear();
   wrapCache.set(key, lines); return lines;
 }
-function autoFit(text, w, h, b, i) {
-  const key = w + '|' + h + '|' + (b ? 1 : 0) + (i ? 1 : 0) + '|' + text;
+// Mayor tamaño de letra (≤ maxS) con el que el texto cabe entero en w×h.
+// Evita partir palabras salvo que eso obligue a usar una letra mucho más pequeña.
+function autoFit(text, w, h, b, i, f, maxS) {
+  maxS = maxS || h * 0.3;
+  const key = w + '|' + h + '|' + (b ? 1 : 0) + (i ? 1 : 0) + '|' + (f || '') + '|' + maxS + '|' + text;
   let s = fitCache.get(key); if (s) return s;
-  s = Math.min(48, h * 0.32);
-  while (s > 4) {
-    const lines = wrap(text || ' ', s, w, b, i);
-    if (lines.length * s * LH <= h) { mctx.font = fontStr(s, b, i); if (String(text).split(/\s+/).every(wd => mctx.measureText(wd).width <= w + 0.5) || s < 10) break; }
-    s *= 0.9;
-  }
-  if (fitCache.size > 2000) fitCache.clear();
+  const words = String(text || ' ').split(/\s+/).filter(Boolean);
+  const fits = (sz, noBreak) => {
+    if (wrap(text || ' ', sz, w, b, i, f).length * sz * LH > h) return false;
+    if (!noBreak) return true;
+    mctx.font = fontStr(sz, b, i, f); return words.every(wd => mctx.measureText(wd).width <= w + 0.5);
+  };
+  const search = noBreak => {
+    let lo = 2, hi = maxS;
+    if (fits(hi, noBreak)) return hi;
+    if (!fits(lo, noBreak)) return lo;
+    for (let k = 0; k < 14; k++) { const m = (lo + hi) / 2; if (fits(m, noBreak)) lo = m; else hi = m; }
+    return lo;
+  };
+  const whole = search(true), broken = whole >= maxS ? whole : search(false);
+  s = whole >= broken * 0.7 ? whole : broken;
+  s = Math.max(2, Math.floor(s * 4) / 4);
+  if (fitCache.size > 3000) fitCache.clear();
   fitCache.set(key, s); return s;
 }
 function fitTextHeight(it) {
-  const lines = wrap(it.text || ' ', it.fontSize, it.w, it.bold, it.italic);
+  const lines = wrap(it.text || ' ', it.fontSize, it.w, it.bold, it.italic, it.font);
   it.h = Math.max(1, lines.length) * it.fontSize * LH;
 }
 function textBox(it) {
   const z = S.view.z;
   switch (it.type) {
-    case 'sticky': { const p = Math.min(it.w, it.h) * 0.08; return {x: it.x + p, y: it.y + p, w: it.w - 2 * p, h: it.h - 2 * p, valign: 'middle'}; }
+    case 'sticky': { const p = Math.min(it.w, it.h) * 0.08; return {x: it.x + p, y: it.y + p, w: it.w - 2 * p, h: it.h - 2 * p, valign: it.valign || 'middle'}; }
     case 'shape': {
       const f = ({rect: .05, round: .07, ellipse: .16, triangle: .25, diamond: .23, hexagon: .14, star: .3, parallelogram: .2, arrow: .1, cylinder: .08})[it.shape] || .08;
       const px = it.w * f + 4, py = it.shape === 'triangle' ? it.h * 0.35 : it.shape === 'cylinder' ? it.h * 0.2 : it.h * f * 0.7 + 4;
-      return {x: it.x + px, y: it.y + py, w: Math.max(10, it.w - 2 * px), h: Math.max(10, it.h - py - (it.shape === 'triangle' ? 4 : py)), valign: 'middle'};
+      return {x: it.x + px, y: it.y + py, w: Math.max(10, it.w - 2 * px), h: Math.max(10, it.h - py - (it.shape === 'triangle' ? 4 : py)), valign: it.valign || 'middle'};
     }
     case 'text': return {x: it.x, y: it.y, w: it.w, h: it.h, valign: 'top'};
     case 'frame': return {x: it.x, y: it.y - 24 / z, w: Math.max(it.w, 120 / z), h: 20 / z, valign: 'middle'};
     case 'connector': {
       const g = connGeom(it), m = polyMid(g.pts), size = it.fontSize || 14;
-      const lines = wrap(it.text || ' ', size, 200, it.bold, it.italic), h = lines.length * size * LH;
+      const lines = wrap(it.text || ' ', size, 200, it.bold, it.italic, it.font), h = lines.length * size * LH;
       return {x: m.x - 100, y: m.y - h / 2, w: 200, h, valign: 'middle'};
     }
   }
@@ -412,16 +439,26 @@ function textBox(it) {
 }
 function fontSizeFor(it, box) {
   if (it.type === 'frame') return 13 / S.view.z;
-  if (it.fontSize === 'auto' || it.fontSize == null) return autoFit(it.text || '', box.w, box.h, it.bold, it.italic);
-  return it.fontSize;
+  const auto = it.fontSize === 'auto' || it.fontSize == null;
+  // Notas y formas: en «Auto» el texto llena el espacio; con tamaño fijo se reduce solo si no cabe.
+  if (it.type === 'sticky' || it.type === 'shape') return autoFit(it.text || '', box.w, box.h, it.bold, it.italic, it.font, auto ? box.h * 0.3 : it.fontSize);
+  return auto ? 16 : it.fontSize;
 }
 function drawTextBlock(c, text, box, size, o) {
-  c.font = fontStr(size, o.bold, o.italic); c.fillStyle = o.color || '#1a1a1a'; c.textBaseline = 'middle';
-  const lines = wrap(text, size, box.w, o.bold, o.italic), lh = size * LH, th = lines.length * lh;
-  const y = o.valign === 'top' ? box.y : box.y + (box.h - th) / 2;
+  c.font = fontStr(size, o.bold, o.italic, o.font); c.fillStyle = o.color || '#1a1a1a'; c.textBaseline = 'middle';
+  const lines = wrap(text, size, box.w, o.bold, o.italic, o.font), lh = size * LH, th = lines.length * lh;
+  const y = o.valign === 'top' ? box.y : o.valign === 'bottom' ? box.y + box.h - th : box.y + (box.h - th) / 2;
   const align = o.align || 'center'; c.textAlign = align;
   const x = align === 'left' ? box.x : align === 'right' ? box.x + box.w : box.x + box.w / 2;
-  lines.forEach((l, i) => c.fillText(l, x, y + lh * i + lh / 2));
+  const t = Math.max(size / 15, 0.5);
+  lines.forEach((l, i) => {
+    const ly = y + lh * i + lh / 2; c.fillText(l, x, ly);
+    if ((o.underline || o.strike) && l) {
+      const w = c.measureText(l).width, x0 = align === 'left' ? x : align === 'right' ? x - w : x - w / 2;
+      if (o.underline) c.fillRect(x0, ly + size * 0.42, w, t);
+      if (o.strike) c.fillRect(x0, ly + size * 0.04 - t / 2, w, t);
+    }
+  });
 }
 
 /* ---------------- Geometría ---------------- */
@@ -584,7 +621,7 @@ function drawItem(c, it) {
     case 'sticky': {
       c.save(); c.shadowColor = 'rgba(0,0,0,.22)'; c.shadowBlur = 10; c.shadowOffsetY = 4;
       c.fillStyle = it.fill; c.fillRect(it.x, it.y, it.w, it.h); c.restore();
-      if (!skipText && it.text) { const tb = textBox(it); drawTextBlock(c, it.text, tb, fontSizeFor(it, tb), {...it, color: it.color || (it.fill === '#1a1a1a' ? '#fff' : '#1a1a1a'), valign: 'middle'}); }
+      if (!skipText && it.text) { const tb = textBox(it); drawTextBlock(c, it.text, tb, fontSizeFor(it, tb), {...it, color: it.color || (it.fill === '#1a1a1a' ? '#fff' : '#1a1a1a'), valign: tb.valign}); }
       if (it.author) { c.font = fontStr(Math.max(8, it.h * 0.055), false, false); c.fillStyle = 'rgba(0,0,0,.45)'; c.textAlign = 'right'; c.textBaseline = 'bottom'; c.fillText(it.author, it.x + it.w - it.w * 0.05, it.y + it.h - it.h * 0.03); }
       break;
     }
@@ -596,7 +633,7 @@ function drawItem(c, it) {
         c.setLineDash(it.dash ? [it.strokeWidth * 3, it.strokeWidth * 2] : []); c.stroke();
         if (it.shape === 'cylinder') { const ry = Math.min(it.h * .15, it.w * .25); c.beginPath(); c.ellipse(it.x + it.w / 2, it.y + ry, it.w / 2, ry, 0, 0, Math.PI, false); c.stroke(); }
       }
-      if (!skipText && it.text) { const tb = textBox(it); drawTextBlock(c, it.text, tb, fontSizeFor(it, tb), {...it, valign: 'middle'}); }
+      if (!skipText && it.text) { const tb = textBox(it); drawTextBlock(c, it.text, tb, fontSizeFor(it, tb), {...it, valign: tb.valign}); }
       break;
     }
     case 'text': if (!skipText) drawTextBlock(c, it.text || '', textBox(it), it.fontSize, {...it, valign: 'top'}); break;
@@ -633,8 +670,8 @@ function drawItem(c, it) {
       if (it.endArrow && P.length > 1) arrowHead(c, P[P.length - 2], P[P.length - 1], hs);
       if (it.startArrow && P.length > 1) arrowHead(c, P[1], P[0], hs);
       if (!skipText && it.text) {
-        const tb = textBox(it), size = it.fontSize || 14, lines = wrap(it.text, size, tb.w, it.bold, it.italic);
-        mctx.font = fontStr(size, it.bold, it.italic); const lw = Math.max(...lines.map(l => mctx.measureText(l).width)) + 10;
+        const tb = textBox(it), size = it.fontSize || 14, lines = wrap(it.text, size, tb.w, it.bold, it.italic, it.font);
+        mctx.font = fontStr(size, it.bold, it.italic, it.font); const lw = Math.max(...lines.map(l => mctx.measureText(l).width)) + 10;
         c.fillStyle = bgColor(); c.fillRect(tb.x + tb.w / 2 - lw / 2, tb.y - 2, lw, tb.h + 4);
         drawTextBlock(c, it.text, tb, size, {...it, color: it.color || it.stroke, align: 'center', valign: 'middle'});
       }
@@ -1059,11 +1096,12 @@ function positionEditor() {
   const z = S.view.z, box = textBox(it), size = fontSizeFor(it, box), s = toScreen(box.x, box.y);
   const bold = it.type === 'frame' ? true : it.bold;
   let padTop = 0;
-  if (box.valign === 'middle') { const lines = wrap(editor.value || ' ', size, box.w, bold, it.italic); padTop = Math.max(0, (box.h - lines.length * size * LH) / 2); }
+  if (box.valign !== 'top') { const lines = wrap(editor.value || ' ', size, box.w, bold, it.italic, it.font), free = Math.max(0, box.h - lines.length * size * LH); padTop = box.valign === 'bottom' ? free : free / 2; }
   Object.assign(editor.style, {
     left: s.x + 'px', top: s.y + 'px', width: box.w * z + 2 + 'px', height: Math.max(box.h, size * LH) * z + 'px',
     fontSize: size * z + 'px', paddingTop: padTop * z + 'px', textAlign: it.type === 'frame' ? 'left' : (it.type === 'connector' ? 'center' : it.align || 'center'),
-    fontWeight: bold ? 700 : 400, fontStyle: it.italic ? 'italic' : 'normal',
+    fontWeight: bold ? 700 : 400, fontStyle: it.italic ? 'italic' : 'normal', fontFamily: it.type === 'frame' ? FONT : famCss(it.font),
+    textDecoration: [it.underline && 'underline', it.strike && 'line-through'].filter(Boolean).join(' ') || 'none',
     color: it.type === 'frame' ? (S.dark ? '#ddd' : '#333') : it.type === 'sticky' ? (it.color || '#1a1a1a') : it.type === 'connector' ? (it.color || it.stroke) : (it.color || '#1a1a1a'),
     background: it.type === 'connector' || it.type === 'frame' ? bgColor() : 'transparent'
   });
@@ -1493,7 +1531,7 @@ $('#fitBtn').onclick = zoomToFit;
 const PROP_TYPES = {
   fill: ['sticky', 'shape', 'frame'], stroke: ['shape', 'pen', 'highlighter', 'connector'], strokeWidth: ['shape', 'pen', 'highlighter', 'connector'],
   color: ['sticky', 'shape', 'text', 'connector'], fontSize: ['sticky', 'shape', 'text', 'connector'], bold: ['sticky', 'shape', 'text', 'connector'],
-  italic: ['sticky', 'shape', 'text', 'connector'], align: ['sticky', 'shape', 'text'], shape: ['shape'], style: ['connector'],
+  italic: ['sticky', 'shape', 'text', 'connector'], font: ['sticky', 'shape', 'text', 'connector'], underline: ['sticky', 'shape', 'text', 'connector'], strike: ['sticky', 'shape', 'text', 'connector'], valign: ['sticky', 'shape'], align: ['sticky', 'shape', 'text'], shape: ['shape'], style: ['connector'],
   rot: ['sticky', 'shape', 'text', 'image', 'emoji', 'pen', 'highlighter'], startArrow: ['connector'], endArrow: ['connector'], dash: ['shape', 'connector', 'pen'], char: ['emoji'], author: ['sticky']
 };
 function shapeIcon(s) { const c = document.createElement('canvas'); return s; }
@@ -1549,10 +1587,11 @@ function controlsFor(types, get, withSel) {
   if (has('sticky', 'shape', 'text', 'connector')) {
     const fs = get('fontSize'), sizes = [10, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48, 64, 80, 96, 128, 160];
     if (fs !== undefined && fs !== 'auto' && !sizes.includes(fs)) sizes.push(fs), sizes.sort((a, b) => a - b);
-    const al = get('align');
-    h += sec('Texto', `<div style="display:flex;gap:6px;margin-bottom:6px"><select data-k="fontSize" style="flex:1">${has('sticky') ? `<option value="auto" ${fs === 'auto' ? 'selected' : ''}>Auto</option>` : ''}${sizes.map(s => `<option value="${s}" ${s == fs ? 'selected' : ''}>${s}px</option>`).join('')}</select></div>
-      <div class="btns">${toggle('bold', '<b>N</b>', get('bold'), 'Negrita')}${toggle('italic', '<i>K</i>', get('italic'), 'Cursiva')}
-      ${has('sticky', 'shape', 'text') ? ['left', 'center', 'right'].map(a => `<button class="bt ${al === a ? 'on' : ''}" data-k="align" data-v="${a}" title="Alinear">${{left: '⇤', center: '↔', right: '⇥'}[a]}</button>`).join('') : ''}</div>`);
+    const al = get('align'), va = get('valign') || 'middle', fnt = get('font') || '';
+    h += sec('Texto', `<button class="bt" data-act="fontpick" title="Tipografía" style="width:100%;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:15px;font-family:${esc(famCss(fnt))}"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(fnt || 'Predeterminada')}</span><span style="font-family:${FONT}">▾</span></button>
+      <div style="display:flex;gap:4px;margin-bottom:6px"><select data-k="fontSize" style="flex:1" title="Tamaño. «Auto» llena la nota o la forma">${has('sticky', 'shape') ? `<option value="auto" ${fs === 'auto' ? 'selected' : ''}>Auto (llenar)</option>` : ''}${sizes.map(s => `<option value="${s}" ${s == fs ? 'selected' : ''}>${s}px</option>`).join('')}</select><button class="bt" data-act="fsDown" title="Letra más pequeña">A−</button><button class="bt" data-act="fsUp" title="Letra más grande">A+</button></div>
+      <div class="btns">${toggle('bold', '<b>N</b>', get('bold'), 'Negrita')}${toggle('italic', '<i>K</i>', get('italic'), 'Cursiva')}${toggle('underline', '<u>S</u>', get('underline'), 'Subrayado')}${toggle('strike', '<s>T</s>', get('strike'), 'Tachado')}</div>
+      ${has('sticky', 'shape', 'text') ? `<div class="btns" style="margin-top:4px">${['left', 'center', 'right'].map(a => `<button class="bt ${al === a ? 'on' : ''}" data-k="align" data-v="${a}" title="${{left: 'Alinear a la izquierda', center: 'Centrar', right: 'Alinear a la derecha'}[a]}">${{left: '⇤', center: '↔', right: '⇥'}[a]}</button>`).join('')}${has('sticky', 'shape') ? ['top', 'middle', 'bottom'].map(v => `<button class="bt ${va === v ? 'on' : ''}" data-k="valign" data-v="${v}" title="${{top: 'Arriba', middle: 'En medio', bottom: 'Abajo'}[v]}">${{top: '⤒', middle: '⇳', bottom: '⤓'}[v]}</button>`).join('') : ''}</div>` : ''}`);
     h += sec('Color del texto', swatches('color', TEXT_COLORS, get('color')));
   }
   if (has('emoji')) h += sec('Sello', `<div class="emojis">${EMOJIS.map(c => `<button class="bt ${get('char') === c ? 'on' : ''}" data-k="char" data-v="${c}">${c}</button>`).join('')}</div>`);
@@ -1600,7 +1639,7 @@ function applyProp(key, val, merge) {
         const t = typeKey(it);
         if (!(key === 'opacity' || key === 'link' || PROP_TYPES[key]?.includes(t))) continue;
         if ((key === 'link' || key === 'rot') && !val) delete it[key]; else it[key] = val;
-        if (t === 'text' && ['fontSize', 'bold', 'italic'].includes(key)) fitTextHeight(it);
+        if (t === 'text' && ['fontSize', 'bold', 'italic', 'font'].includes(key)) fitTextHeight(it);
         if (S.defaults[t] && key in S.defaults[t] && key !== 'text') S.defaults[t][key] = val;
       }
     }, merge ? 'prop:' + key : null);
@@ -1639,6 +1678,18 @@ function doAction(a) {
     case 'zoomsel': zoomToSelection(); break;
     case 'pngsel': exportPNG(true); break;
     case 'child': mindmapChild(); break;
+    case 'fontpick': openFontPicker(document.querySelector('[data-act=fontpick]')); break;
+    case 'fsUp': case 'fsDown': {
+      const SZ = [8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48, 64, 80, 96, 128, 160, 200];
+      if (!sel.length) { const b = TOOL_BUCKET[S.tool], d = b && S.defaults[b]; if (d && typeof d.fontSize === 'number') { d.fontSize = a === 'fsUp' ? (SZ.find(s => s > d.fontSize) || d.fontSize) : ([...SZ].reverse().find(s => s < d.fontSize) || d.fontSize); saveDefaults(); updatePanel(); } break; }
+      mutate(() => sel.forEach(i => {
+        if (!PROP_TYPES.fontSize.includes(typeKey(i))) return;
+        let cur = i.fontSize; if (cur === 'auto' || cur == null) cur = Math.round(fontSizeFor(i, textBox(i)));
+        i.fontSize = a === 'fsUp' ? (SZ.find(s => s > cur) || cur) : ([...SZ].reverse().find(s => s < cur) || cur);
+        if (i.type === 'text') fitTextHeight(i);
+      }));
+      break;
+    }
     case 'rot90': case 'rotm90': case 'rot0': mutate(() => sel.forEach(i => { if (!ROTATABLE.has(i.type) || i.locked) return; const r = a === 'rot0' ? 0 : normAng((i.rot || 0) + (a === 'rot90' ? 1 : -1) * Math.PI / 2); if (Math.abs(r) < 1e-4) delete i.rot; else i.rot = r; })); break;
     case 'toshape': mutate(() => { const s = sel[0]; Object.assign(s, {type: 'shape', shape: 'rect', stroke: 'transparent', strokeWidth: 0, fontSize: 16}); }); break;
     case 'tosticky': mutate(() => { const s = sel[0]; s.type = 'sticky'; if (!s.fill || s.fill === 'transparent' || s.fill === '#ffffff') s.fill = '#fff9b1'; s.fontSize = 'auto'; s.w = s.h = Math.max(s.w, s.h); }); break;
@@ -1730,10 +1781,11 @@ function openMenu(sel, anchor, side) {
   const m = $(sel), open = m.classList.contains('open'); closeMenus(); if (open) return;
   m.classList.add('open'); const r = anchor.getBoundingClientRect();
   if (side === 'right') { m.style.left = r.right + 10 + 'px'; m.style.top = Math.min(r.top, innerHeight - m.offsetHeight - 10) + 'px'; m.style.right = 'auto'; }
+  else if (side === 'left') { m.style.left = Math.max(10, r.left - m.offsetWidth - 10) + 'px'; m.style.top = clamp(r.top - 60, 10, innerHeight - m.offsetHeight - 10) + 'px'; }
   else { m.style.top = r.bottom + 8 + 'px'; m.style.left = Math.min(r.left, innerWidth - m.offsetWidth - 10) + 'px'; }
 }
 function closeMenus() { document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open')); }
-document.addEventListener('pointerdown', e => { if (!e.target.closest('.menu') && !e.target.closest('#exportBtn,#timerBtn,#commentsBtn,[data-tool=templates]')) closeMenus(); });
+document.addEventListener('pointerdown', e => { if (!e.target.closest('.menu') && !e.target.closest('#exportBtn,#timerBtn,#commentsBtn,[data-tool=templates],[data-act=fontpick]')) closeMenus(); });
 $('#exportBtn').onclick = e => openMenu('#exportMenu', e.currentTarget);
 $('#exportMenu').addEventListener('click', e => {
   const b = e.target.closest('[data-ex]'); if (!b) return; closeMenus();
@@ -1795,10 +1847,11 @@ function exportSVG() {
   out.push(`<defs><filter id="sh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="3" stdDeviation="4" flood-opacity=".2"/></filter></defs>`);
   out.push(`<rect x="${X(b.x)}" y="${X(b.y)}" width="${X(b.w)}" height="${X(b.h)}" fill="#fff"/>`);
   const txt = (it, box, size, o) => {
-    const lines = wrap(o.text, size, box.w, o.bold, o.italic), lh = size * LH, th = lines.length * lh;
-    const y0 = o.valign === 'top' ? box.y : box.y + (box.h - th) / 2, al = o.align || 'center';
+    const lines = wrap(o.text, size, box.w, o.bold, o.italic, o.font), lh = size * LH, th = lines.length * lh;
+    const y0 = o.valign === 'top' ? box.y : o.valign === 'bottom' ? box.y + box.h - th : box.y + (box.h - th) / 2, al = o.align || 'center';
+    const deco = [o.underline && 'underline', o.strike && 'line-through'].filter(Boolean).join(' ');
     const x = al === 'left' ? box.x : al === 'right' ? box.x + box.w : box.x + box.w / 2, anchor = al === 'left' ? 'start' : al === 'right' ? 'end' : 'middle';
-    return lines.map((l, i) => `<text x="${X(x)}" y="${X(y0 + lh * i + lh / 2)}" font-size="${X(size)}" fill="${o.color || '#1a1a1a'}" text-anchor="${anchor}" dominant-baseline="central"${o.bold ? ' font-weight="700"' : ''}${o.italic ? ' font-style="italic"' : ''}>${esc(l)}</text>`).join('');
+    return lines.map((l, i) => `<text x="${X(x)}" y="${X(y0 + lh * i + lh / 2)}" font-size="${X(size)}" fill="${o.color || '#1a1a1a'}" text-anchor="${anchor}" dominant-baseline="central"${o.bold ? ' font-weight="700"' : ''}${o.italic ? ' font-style="italic"' : ''}${o.font ? ` font-family="${esc(famCss(o.font))}"` : ''}${deco ? ` text-decoration="${deco}"` : ''}>${esc(l)}</text>`).join('');
   };
   const pathD = (s, x, y, w, h) => {
     const pc = {beginPath() { this.d = ''; }, moveTo(a, b) { this.d += `M${X(a)} ${X(b)}`; }, lineTo(a, b) { this.d += `L${X(a)} ${X(b)}`; }, closePath() { this.d += 'Z'; }, rect(a, b, c, d) { this.d += `M${X(a)} ${X(b)}h${X(c)}v${X(d)}h${X(-c)}Z`; },
@@ -1814,8 +1867,8 @@ function exportSVG() {
     out.push(`<g${op}${it.rot && ROTATABLE.has(it.type) ? ` transform="rotate(${X(it.rot * 180 / Math.PI)} ${X(it.x + it.w / 2)} ${X(it.y + it.h / 2)})"` : ''}>`);
     switch (it.type) {
       case 'frame': out.push(`<rect x="${X(it.x)}" y="${X(it.y)}" width="${X(it.w)}" height="${X(it.h)}" fill="${it.fill || '#fff'}" stroke="rgba(0,0,0,.2)"/><text x="${X(it.x)}" y="${X(it.y - 14)}" font-size="13" font-weight="700" fill="#555" dominant-baseline="central">${esc(it.title || 'Marco')}</text>`); break;
-      case 'sticky': out.push(`<rect x="${X(it.x)}" y="${X(it.y)}" width="${X(it.w)}" height="${X(it.h)}" fill="${it.fill}" filter="url(#sh)"/>`); if (it.text) { const tb = textBox(it); out.push(txt(it, tb, fontSizeFor(it, tb), {...it, color: it.color || '#1a1a1a', valign: 'middle'})); } break;
-      case 'shape': out.push(`<path d="${pathD(it.shape, it.x, it.y, it.w, it.h)}" fill="${it.fill === 'transparent' ? 'none' : it.fill}" stroke="${it.strokeWidth > 0 ? it.stroke : 'none'}" stroke-width="${it.strokeWidth}" stroke-linejoin="round"${it.dash ? ` stroke-dasharray="${it.strokeWidth * 3} ${it.strokeWidth * 2}"` : ''}/>`); if (it.text) { const tb = textBox(it); out.push(txt(it, tb, fontSizeFor(it, tb), {...it, valign: 'middle'})); } break;
+      case 'sticky': out.push(`<rect x="${X(it.x)}" y="${X(it.y)}" width="${X(it.w)}" height="${X(it.h)}" fill="${it.fill}" filter="url(#sh)"/>`); if (it.text) { const tb = textBox(it); out.push(txt(it, tb, fontSizeFor(it, tb), {...it, color: it.color || '#1a1a1a', valign: tb.valign})); } break;
+      case 'shape': out.push(`<path d="${pathD(it.shape, it.x, it.y, it.w, it.h)}" fill="${it.fill === 'transparent' ? 'none' : it.fill}" stroke="${it.strokeWidth > 0 ? it.stroke : 'none'}" stroke-width="${it.strokeWidth}" stroke-linejoin="round"${it.dash ? ` stroke-dasharray="${it.strokeWidth * 3} ${it.strokeWidth * 2}"` : ''}/>`); if (it.text) { const tb = textBox(it); out.push(txt(it, tb, fontSizeFor(it, tb), {...it, valign: tb.valign})); } break;
       case 'text': out.push(txt(it, textBox(it), it.fontSize, {...it, valign: 'top'})); break;
       case 'image': out.push(`<image x="${X(it.x)}" y="${X(it.y)}" width="${X(it.w)}" height="${X(it.h)}" preserveAspectRatio="none" href="${S.assets[it.asset] || ''}"/>`); break;
       case 'emoji': out.push(`<text x="${X(it.x + it.w / 2)}" y="${X(it.y + it.h / 2)}" font-size="${X(it.h * 0.82)}" text-anchor="middle" dominant-baseline="central">${it.char}</text>`); break;
@@ -2098,6 +2151,60 @@ $('#modalBg').addEventListener('pointerdown', e => { if (e.target.id === 'modalB
 $('#helpBtn').onclick = showHelp;
 let toastT = null;
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2200); }
+
+/* ---------------- Tipografías ---------------- */
+const COMMON_FONTS = ['Arial', 'Arial Black', 'Arial Narrow', 'Bahnschrift', 'Calibri', 'Cambria', 'Candara', 'Comic Sans MS', 'Consolas', 'Constantia', 'Corbel', 'Courier New', 'Franklin Gothic Medium', 'Gabriola', 'Garamond', 'Georgia', 'Impact', 'Ink Free', 'Lucida Console', 'Lucida Handwriting', 'Lucida Sans Unicode', 'MV Boli', 'Palatino Linotype', 'Segoe Print', 'Segoe Script', 'Segoe UI', 'Sitka Text', 'Sylfaen', 'Tahoma', 'Times New Roman', 'Trebuchet MS', 'Verdana', 'Book Antiqua', 'Century Gothic', 'Bookman Old Style', 'Brush Script MT', 'Papyrus', 'Rockwell', 'Cascadia Code', 'Aptos', 'Helvetica', 'Helvetica Neue', 'Avenir', 'Futura', 'Gill Sans', 'Optima', 'Baskerville', 'Didot', 'Menlo', 'Monaco', 'Chalkboard', 'Marker Felt', 'Noteworthy', 'American Typewriter', 'Roboto', 'Open Sans', 'Lato', 'Montserrat', 'Poppins', 'Noto Sans', 'Noto Serif', 'DejaVu Sans', 'DejaVu Serif', 'DejaVu Sans Mono', 'Liberation Sans', 'Liberation Serif', 'Liberation Mono', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Source Sans Pro'];
+let fontList = null;
+function fontAvailable(name) {
+  const t = 'mmmmmmmmmmlli1WQ@#ñ', m = f => { mctx.font = '72px ' + f; return mctx.measureText(t).width; };
+  const q = '"' + name.replace(/"/g, '') + '"';
+  return m(`${q}, monospace`) !== m('monospace') || m(`${q}, serif`) !== m('serif');
+}
+function getFontList() {
+  if (!fontList) {
+    let saved = []; try { saved = JSON.parse(localStorage.getItem('pizarra-fonts') || '[]'); } catch (e) {}
+    fontList = [...new Set([...COMMON_FONTS.filter(fontAvailable), ...saved])].sort((a, b) => a.localeCompare(b));
+  }
+  return fontList;
+}
+function currentFont() {
+  const items = selectedItems().filter(i => PROP_TYPES.font.includes(typeKey(i)));
+  if (items.length) return items[0].font || '';
+  const b = TOOL_BUCKET[S.tool]; return (b && S.defaults[b] && S.defaults[b].font) || '';
+}
+function openFontPicker(anchor) {
+  if (!anchor) return;
+  openMenu('#fontPicker', anchor, 'left'); if (!$('#fontPicker').classList.contains('open')) return;
+  $('#fontSearch').value = ''; $('#fontLoadSys').style.display = window.queryLocalFonts ? '' : 'none';
+  renderFontList();
+  const m = $('#fontPicker'), r = anchor.getBoundingClientRect();
+  m.style.left = Math.max(10, r.left - m.offsetWidth - 10) + 'px'; m.style.top = clamp(r.top - 60, 10, innerHeight - m.offsetHeight - 10) + 'px';
+  setTimeout(() => { $('#fontSearch').focus(); $('#fontList .fi.on')?.scrollIntoView({block: 'center'}); }, 0);
+}
+function renderFontList() {
+  const typed = $('#fontSearch').value.trim(), q = typed.toLowerCase(), cur = currentFont();
+  const list = getFontList().filter(f => f.toLowerCase().includes(q));
+  let html = q ? '' : `<div class="fi ${!cur ? 'on' : ''}" data-font="" style="font-family:${FONT}">Predeterminada</div>`;
+  html += list.slice(0, 800).map(f => `<div class="fi ${f === cur ? 'on' : ''}" data-font="${esc(f)}" title="${esc(f)}" style="font-family:${esc(famCss(f))}">${esc(f)}</div>`).join('');
+  if (typed && !list.some(f => f.toLowerCase() === q)) html += `<div class="fi" data-font="${esc(typed)}" style="font-family:${esc(famCss(typed))}" title="Usa una fuente instalada escribiendo su nombre exacto">Usar «${esc(typed)}»</div>`;
+  $('#fontList').innerHTML = html || '<div style="padding:8px;color:var(--muted)">Sin resultados</div>';
+}
+async function loadSystemFonts() {
+  try {
+    const fams = [...new Set((await window.queryLocalFonts()).map(f => f.family))];
+    if (!fams.length) return toast('No se dio permiso para leer las fuentes');
+    localStorage.setItem('pizarra-fonts', JSON.stringify(fams)); fontList = null; renderFontList();
+    toast(`✓ ${getFontList().length} fuentes disponibles`);
+  } catch (e) { toast('No se pudieron leer las fuentes del equipo'); }
+}
+$('#fontSearch').addEventListener('input', renderFontList);
+$('#fontSearch').addEventListener('keydown', e => {
+  e.stopPropagation();
+  if (e.key === 'Enter') { const f = $('#fontList .fi'); if (f) { applyProp('font', f.dataset.font); closeMenus(); } }
+  if (e.key === 'Escape') closeMenus();
+});
+$('#fontList').addEventListener('click', e => { const f = e.target.closest('.fi'); if (!f) return; applyProp('font', f.dataset.font); closeMenus(); });
+$('#fontLoadSys').onclick = loadSystemFonts;
 
 /* ---------------- Comentarios ---------------- */
 let cpState = null;

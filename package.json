@@ -1,7 +1,7 @@
 {
   "name": "pizarra-local",
   "productName": "Pizarra Local",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Pizarra infinita colaborativa 100% local (estilo Miro)",
   "main": "main.js",
   "author": "Pizarra Local",

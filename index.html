@@ -572,7 +572,7 @@ function richToHtml(it) {
     if (r.i != null) css.push(`font-style:${r.i ? 'italic' : 'normal'}`);
     if (r.u != null || r.s != null) css.push(`text-decoration-line:${[(r.u ?? base.u) && 'underline', (r.s ?? base.s) && 'line-through'].filter(Boolean).join(' ') || 'none'}`);
     if (r.c) css.push(`color:${r.c}`);
-    return css.length ? `<span style="${css.join(';')}">${esc(r.t)}</span>` : esc(r.t);
+    return css.length ? `<span style="${esc(css.join(';'))}">${esc(r.t)}</span>` : esc(r.t);
   }).join('');
   let html = '', list = null;
   const close = () => { if (list) { html += list === 'ol' ? '</ol>' : '</ul>'; list = null; } };
@@ -1694,7 +1694,7 @@ function selectDown(e, w, p) {
   }
   const it = hitItem(w);
   if (it) {
-    if ((e.ctrlKey || e.metaKey) && it.link) { window.open(it.link, '_blank', 'noopener'); return; }
+    if ((e.ctrlKey || e.metaKey) && /^(?:https?:\/\/|mailto:)/i.test(it.link || '')) { window.open(it.link, '_blank', 'noopener'); return; }
     if (!e.shiftKey && !e.altKey && !it.locked) { const para = checkAt(it, w); if (para) { mutate(() => { para.c = !para.c; }); return; } }
     const targets = expandGroups([it.id]);
     if (e.shiftKey) { const on = S.sel.has(it.id); for (const id of targets) on ? S.sel.delete(id) : S.sel.add(id); updatePanel(); if (on) return; }
@@ -2306,7 +2306,7 @@ function exportSVG() {
     const y0 = o.valign === 'top' ? box.y : o.valign === 'bottom' ? box.y + box.h - th : box.y + (box.h - th) / 2, al = o.align || 'center';
     const deco = [o.underline && 'underline', o.strike && 'line-through'].filter(Boolean).join(' ');
     const x = al === 'left' ? box.x : al === 'right' ? box.x + box.w : box.x + box.w / 2, anchor = al === 'left' ? 'start' : al === 'right' ? 'end' : 'middle';
-    return lines.map((l, i) => `<text x="${X(x)}" y="${X(y0 + lh * i + lh / 2)}" font-size="${X(size)}" fill="${o.color || '#1a1a1a'}" text-anchor="${anchor}" dominant-baseline="central"${o.bold ? ' font-weight="700"' : ''}${o.italic ? ' font-style="italic"' : ''}${o.font ? ` font-family="${esc(famCss(o.font))}"` : ''}${deco ? ` text-decoration="${deco}"` : ''}>${esc(l)}</text>`).join('');
+    return lines.map((l, i) => `<text x="${X(x)}" y="${X(y0 + lh * i + lh / 2)}" font-size="${X(size)}" fill="${esc(o.color || '#1a1a1a')}" text-anchor="${anchor}" dominant-baseline="central"${o.bold ? ' font-weight="700"' : ''}${o.italic ? ' font-style="italic"' : ''}${o.font ? ` font-family="${esc(famCss(o.font))}"` : ''}${deco ? ` text-decoration="${deco}"` : ''}>${esc(l)}</text>`).join('');
   };
   const richSvg = (it, box, size) => {
     const base = it.color || defaultTextColor(it), fam = esc(famCss(it.font)), o = [];
@@ -2316,13 +2316,13 @@ function exportSVG() {
         if (l.marker.check !== undefined) {
           const q = size * 0.8, bx = x - size * 1.15, by = ly - q / 2;
           o.push(l.marker.check ? `<rect x="${X(bx)}" y="${X(by)}" width="${X(q)}" height="${X(q)}" fill="${ACC}"/><path d="M${X(bx + q * .22)} ${X(by + q * .52)}L${X(bx + q * .43)} ${X(by + q * .72)}L${X(bx + q * .8)} ${X(by + q * .3)}" stroke="#fff" stroke-width="${X(Math.max(size / 12, .75))}" fill="none" stroke-linecap="round"/>`
-            : `<rect x="${X(bx)}" y="${X(by)}" width="${X(q)}" height="${X(q)}" fill="none" stroke="${base}" stroke-width="${X(Math.max(size / 12, .75))}"/>`);
-        } else o.push(`<text x="${X(x - size * 0.35)}" y="${X(ly)}" font-size="${X(size)}" font-family="${fam}" fill="${base}" text-anchor="end" dominant-baseline="central">${esc(l.marker.t)}</text>`);
+            : `<rect x="${X(bx)}" y="${X(by)}" width="${X(q)}" height="${X(q)}" fill="none" stroke="${esc(base)}" stroke-width="${X(Math.max(size / 12, .75))}"/>`);
+        } else o.push(`<text x="${X(x - size * 0.35)}" y="${X(ly)}" font-size="${X(size)}" font-family="${fam}" fill="${esc(base)}" text-anchor="end" dominant-baseline="central">${esc(l.marker.t)}</text>`);
       }
       let sx = x;
       for (const sg of l.segs) {
         const st = sg.st, d = [(st.u ?? it.underline) && 'underline', ((st.s ?? it.strike) || done) && 'line-through'].filter(Boolean).join(' ');
-        if (!sg.sp) o.push(`<text x="${X(sx)}" y="${X(ly)}" font-size="${X(size)}" font-family="${fam}" fill="${done ? '#999999' : st.c || base}" dominant-baseline="central"${(st.b ?? it.bold) ? ' font-weight="700"' : ''}${(st.i ?? it.italic) ? ' font-style="italic"' : ''}${d ? ` text-decoration="${d}"` : ''} xml:space="preserve">${esc(sg.t)}</text>`);
+        if (!sg.sp) o.push(`<text x="${X(sx)}" y="${X(ly)}" font-size="${X(size)}" font-family="${fam}" fill="${esc(done ? '#999999' : st.c || base)}" dominant-baseline="central"${(st.b ?? it.bold) ? ' font-weight="700"' : ''}${(st.i ?? it.italic) ? ' font-style="italic"' : ''}${d ? ` text-decoration="${d}"` : ''} xml:space="preserve">${esc(sg.t)}</text>`);
         sx += sg.w;
       }
     }
@@ -2338,26 +2338,27 @@ function exportSVG() {
   const saved = S.view; S.view = {x: 0, y: 0, z: 1};
   const order = [...items.filter(i => i.type === 'frame'), ...items.filter(i => i.type !== 'frame')];
   for (const it of order) {
-    const op = it.opacity != null && it.opacity < 1 ? ` opacity="${it.opacity}"` : '';
+    const op = it.opacity != null && it.opacity < 1 ? ` opacity="${esc(it.opacity)}"` : '';
     out.push(`<g${op}${it.rot && ROTATABLE.has(it.type) ? ` transform="rotate(${X(it.rot * 180 / Math.PI)} ${X(it.x + it.w / 2)} ${X(it.y + it.h / 2)})"` : ''}>`);
     switch (it.type) {
-      case 'frame': out.push(`<rect x="${X(it.x)}" y="${X(it.y)}" width="${X(it.w)}" height="${X(it.h)}" fill="${it.fill || '#fff'}" stroke="rgba(0,0,0,.2)"/><text x="${X(it.x)}" y="${X(it.y - 14)}" font-size="13" font-weight="700" fill="#555" dominant-baseline="central">${esc(it.title || 'Marco')}</text>`); break;
-      case 'sticky': out.push(`<rect x="${X(it.x)}" y="${X(it.y)}" width="${X(it.w)}" height="${X(it.h)}" fill="${it.fill}" filter="url(#sh)"/>`); if (it.text || it.rich) { const tb = textBox(it); out.push(richSvg(it, tb, fontSizeFor(it, tb))); } break;
-      case 'shape': out.push(`<path d="${pathD(it.shape, it.x, it.y, it.w, it.h)}" fill="${it.fill === 'transparent' ? 'none' : it.fill}" stroke="${it.strokeWidth > 0 ? it.stroke : 'none'}" stroke-width="${it.strokeWidth}" stroke-linejoin="round"${it.dash ? ` stroke-dasharray="${it.strokeWidth * 3} ${it.strokeWidth * 2}"` : ''}/>`); if (it.text || it.rich) { const tb = textBox(it); out.push(richSvg(it, tb, fontSizeFor(it, tb))); } break;
+      case 'frame': out.push(`<rect x="${X(it.x)}" y="${X(it.y)}" width="${X(it.w)}" height="${X(it.h)}" fill="${esc(it.fill || '#fff')}" stroke="rgba(0,0,0,.2)"/><text x="${X(it.x)}" y="${X(it.y - 14)}" font-size="13" font-weight="700" fill="#555" dominant-baseline="central">${esc(it.title || 'Marco')}</text>`); break;
+      case 'sticky': out.push(`<rect x="${X(it.x)}" y="${X(it.y)}" width="${X(it.w)}" height="${X(it.h)}" fill="${esc(it.fill)}" filter="url(#sh)"/>`); if (it.text || it.rich) { const tb = textBox(it); out.push(richSvg(it, tb, fontSizeFor(it, tb))); } break;
+      case 'shape': out.push(`<path d="${pathD(it.shape, it.x, it.y, it.w, it.h)}" fill="${esc(it.fill === 'transparent' ? 'none' : it.fill)}" stroke="${esc(it.strokeWidth > 0 ? it.stroke : 'none')}" stroke-width="${esc(it.strokeWidth)}" stroke-linejoin="round"${it.dash ? ` stroke-dasharray="${it.strokeWidth * 3} ${it.strokeWidth * 2}"` : ''}/>`); if (it.text || it.rich) { const tb = textBox(it); out.push(richSvg(it, tb, fontSizeFor(it, tb))); } break;
       case 'text': out.push(richSvg(it, textBox(it), it.fontSize)); break;
       case 'image': {
-        const src = S.assets[it.asset] || '', cr = it.crop;
-        if (!cr) { out.push(`<image x="${X(it.x)}" y="${X(it.y)}" width="${X(it.w)}" height="${X(it.h)}" preserveAspectRatio="none" href="${src}"/>`); break; }
+        const src = S.assets[it.asset], cr = it.crop;
+        if (!isImageData(src)) break;
+        if (!cr) { out.push(`<image x="${X(it.x)}" y="${X(it.y)}" width="${X(it.w)}" height="${X(it.h)}" preserveAspectRatio="none" href="${esc(src)}"/>`); break; }
         const img = getImg(it.asset), nw = (img && img.naturalWidth) || 1000, nh = (img && img.naturalHeight) || 1000;
-        out.push(`<svg x="${X(it.x)}" y="${X(it.y)}" width="${X(it.w)}" height="${X(it.h)}" viewBox="${X(cr.x * nw)} ${X(cr.y * nh)} ${X(cr.w * nw)} ${X(cr.h * nh)}" preserveAspectRatio="none"><image width="${nw}" height="${nh}" href="${src}"/></svg>`);
+        out.push(`<svg x="${X(it.x)}" y="${X(it.y)}" width="${X(it.w)}" height="${X(it.h)}" viewBox="${X(cr.x * nw)} ${X(cr.y * nh)} ${X(cr.w * nw)} ${X(cr.h * nh)}" preserveAspectRatio="none"><image width="${nw}" height="${nh}" href="${esc(src)}"/></svg>`);
         break;
       }
-      case 'emoji': out.push(`<text x="${X(it.x + it.w / 2)}" y="${X(it.y + it.h / 2)}" font-size="${X(it.h * 0.82)}" text-anchor="middle" dominant-baseline="central">${it.char}</text>`); break;
-      case 'pen': { const P = penPoints(it); out.push(`<polyline points="${P.map(p => X(p.x) + ',' + X(p.y)).join(' ')}" fill="none" stroke="${it.stroke}" stroke-width="${it.strokeWidth}" stroke-linecap="round" stroke-linejoin="round"${it.hl ? ' stroke-opacity=".45"' : ''}/>`); break; }
+      case 'emoji': out.push(`<text x="${X(it.x + it.w / 2)}" y="${X(it.y + it.h / 2)}" font-size="${X(it.h * 0.82)}" text-anchor="middle" dominant-baseline="central">${esc(it.char)}</text>`); break;
+      case 'pen': { const P = penPoints(it); out.push(`<polyline points="${P.map(p => X(p.x) + ',' + X(p.y)).join(' ')}" fill="none" stroke="${esc(it.stroke)}" stroke-width="${esc(it.strokeWidth)}" stroke-linecap="round" stroke-linejoin="round"${it.hl ? ' stroke-opacity=".45"' : ''}/>`); break; }
       case 'connector': {
         const g = connGeom(it), P = g.pts, hs = 8 + it.strokeWidth * 2.2;
-        out.push(`<polyline points="${P.map(p => X(p.x) + ',' + X(p.y)).join(' ')}" fill="none" stroke="${it.stroke}" stroke-width="${it.strokeWidth}" stroke-linecap="round" stroke-linejoin="round"${it.dash ? ` stroke-dasharray="${it.strokeWidth * 3} ${it.strokeWidth * 3}"` : ''}/>`);
-        const head = (f, t) => { const a = Math.atan2(t.y - f.y, t.x - f.x); return `<path d="M${X(t.x)} ${X(t.y)}L${X(t.x - hs * Math.cos(a - .45))} ${X(t.y - hs * Math.sin(a - .45))}L${X(t.x - hs * Math.cos(a + .45))} ${X(t.y - hs * Math.sin(a + .45))}Z" fill="${it.stroke}"/>`; };
+        out.push(`<polyline points="${P.map(p => X(p.x) + ',' + X(p.y)).join(' ')}" fill="none" stroke="${esc(it.stroke)}" stroke-width="${esc(it.strokeWidth)}" stroke-linecap="round" stroke-linejoin="round"${it.dash ? ` stroke-dasharray="${it.strokeWidth * 3} ${it.strokeWidth * 3}"` : ''}/>`);
+        const head = (f, t) => { const a = Math.atan2(t.y - f.y, t.x - f.x); return `<path d="M${X(t.x)} ${X(t.y)}L${X(t.x - hs * Math.cos(a - .45))} ${X(t.y - hs * Math.sin(a - .45))}L${X(t.x - hs * Math.cos(a + .45))} ${X(t.y - hs * Math.sin(a + .45))}Z" fill="${esc(it.stroke)}"/>`; };
         if (it.endArrow) out.push(head(P[P.length - 2], P[P.length - 1])); if (it.startArrow) out.push(head(P[1], P[0]));
         if (it.text) { const tb = textBox(it); out.push(`<rect x="${X(tb.x)}" y="${X(tb.y)}" width="${X(tb.w)}" height="${X(tb.h)}" fill="#fff" opacity=".85"/>` + txt(it, tb, it.fontSize || 14, {...it, color: it.color || it.stroke, align: 'center', valign: 'middle'})); }
         break;
@@ -2373,11 +2374,54 @@ function exportJSON() {
   const data = {app: 'pizarra-local', version: 1, name: S.board.name, exported: new Date().toISOString(), items: S.items, assets: S.assets};
   download(new Blob([JSON.stringify(data)], {type: 'application/json'}), safeName() + '.json'); toast('Copia guardada');
 }
+const isImageData = value => typeof value === 'string' && /^data:image\/[\w.+-]+;base64,[a-z0-9+/]+=*$/i.test(value);
+
+function validateBoardImport(data) {
+  const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+  const id = value => typeof value === 'string' && value.length > 0;
+  const number = Number.isFinite;
+  const point = value => record(value) && number(value.x) && number(value.y);
+  const end = value => record(value) && (id(value.id) || point(value))
+    && (value.x === undefined || number(value.x)) && (value.y === undefined || number(value.y));
+  const optionalStrings = (value, keys) => keys.every(key => value[key] === undefined || typeof value[key] === 'string');
+  const rich = paragraphs => Array.isArray(paragraphs) && paragraphs.every(p => record(p)
+    && Array.isArray(p.runs) && p.runs.every(r => record(r) && typeof r.t === 'string' && optionalStrings(r, ['c'])));
+
+  if (!record(data) || !Array.isArray(data.items) || !optionalStrings(data, ['name'])
+      || (data.version !== undefined && data.version !== 1)) {
+    throw new Error('formato de tablero no válido');
+  }
+  const assets = data.assets ?? {};
+  if (!record(assets) || !Object.values(assets).every(isImageData)) {
+    throw new Error('recursos de imagen no válidos');
+  }
+
+  const types = new Set(['sticky', 'shape', 'text', 'pen', 'connector', 'frame', 'emoji', 'image', 'comment']);
+  const ids = new Set();
+  for (const [index, item] of data.items.entries()) {
+    const valid = record(item) && types.has(item.type) && id(item.id) && !ids.has(item.id)
+      && optionalStrings(item, ['text', 'title', 'char', 'font', 'link', 'fill', 'stroke', 'color', 'shape', 'align', 'valign', 'style', 'author'])
+      && ['rot', 'opacity', 'strokeWidth'].every(key => item[key] === undefined || number(item[key]))
+      && (item.fontSize === undefined || item.fontSize === 'auto' || (number(item.fontSize) && item.fontSize > 0))
+      && (item.rich === undefined || rich(item.rich))
+      && (item.type === 'connector' ? end(item.from) && end(item.to) : point(item))
+      && (['comment', 'connector'].includes(item.type) || (number(item.w) && number(item.h) && item.w >= 0 && item.h >= 0))
+      && (item.type !== 'pen' || (Array.isArray(item.pts) && item.pts.every(p => Array.isArray(p) && p.length === 2 && p.every(number))))
+      && (item.type !== 'image' || (id(item.asset) && Object.hasOwn(assets, item.asset)
+        && (item.crop === undefined || (point(item.crop) && number(item.crop.w) && number(item.crop.h) && item.crop.w > 0 && item.crop.h > 0))))
+      && (item.type !== 'comment' || (Array.isArray(item.thread) && item.thread.every(m => record(m)
+        && id(m.id) && typeof m.text === 'string' && optionalStrings(m, ['author']) && number(m.ts))));
+    if (!valid) throw new Error(`elemento ${index + 1} no válido`);
+    ids.add(item.id);
+  }
+  return assets;
+}
+
 async function importJSONFile(f) {
   try {
     const d = JSON.parse(await f.text());
-    if (!Array.isArray(d.items)) throw new Error('formato no válido');
-    const b = {id: uid(), name: (d.name || f.name.replace(/\.json$/, '')) + ' (importado)', items: d.items, assets: d.assets || {}, view: null, created: Date.now(), updated: Date.now()};
+    const assets = validateBoardImport(d);
+    const b = {id: uid(), name: (d.name || f.name.replace(/\.json$/, '')) + ' (importado)', items: d.items, assets, view: null, created: Date.now(), updated: Date.now()};
     await Store.put(b); await openBoard(b.id); toast('Tablero importado'); renderBoardList();
   } catch (e) { toast('No se pudo importar: ' + e.message); }
 }
@@ -2528,7 +2572,7 @@ function beep() { try { const a = new (window.AudioContext || window.webkitAudio
 /* ---------------- Tableros ---------------- */
 async function renderBoardList() {
   const all = (await Store.all()).sort((a, b) => (b.updated || 0) - (a.updated || 0));
-  $('#boardList').innerHTML = all.map(b => `<div class="brow ${S.board && b.id === S.board.id ? 'cur' : ''}" data-id="${b.id}">
+  $('#boardList').innerHTML = all.map(b => `<div class="brow ${S.board && b.id === S.board.id ? 'cur' : ''}" data-id="${esc(b.id)}">
     <div class="nm"><b>${esc(b.name || 'Sin título')}</b><small>${(b.items || []).length} elementos · ${new Date(b.updated || Date.now()).toLocaleString()}</small></div>
     <button class="tb" data-bact="rename" title="Renombrar">✎</button><button class="tb" data-bact="dup" title="Duplicar">⧉</button><button class="tb" data-bact="del" title="Eliminar">🗑</button></div>`).join('');
 }
@@ -2539,8 +2583,29 @@ $('#boardList').addEventListener('click', async e => {
   else if (act === 'dup') { if (id === S.board.id) await saveNow(); const src = id === S.board.id ? S.board : b; const c = clone(src); c.id = uid(); c.name = src.name + ' (copia)'; c.updated = Date.now(); await Store.put(c); renderBoardList(); toast('Tablero duplicado'); }
   else if (act === 'del') {
     if (!confirm(`¿Eliminar el tablero "${b.name}"? Esta acción no se puede deshacer.`)) return;
-    await Store.del(id);
-    if (S.board.id === id) { const rest = (await Store.all()); if (rest.length) await openBoard(rest[0].id); else await newBoard(); }
+    const active = S.board?.id === id ? S.board : null;
+    if (active) {
+      commitEdit();
+      clearTimeout(saveTimer);
+      clearTimeout(viewSaveT);
+      saveTimer = null;
+      S.board = null;
+    }
+    try {
+      await Store.del(id);
+    } catch (error) {
+      if (active && !S.board) {
+        S.board = active;
+        scheduleSave();
+      }
+      toast('No se pudo eliminar el tablero: ' + error.message);
+      return;
+    }
+    if (active && !S.board) {
+      const [next] = await Store.all();
+      if (next) await openBoard(next.id);
+      else await newBoard('Nuevo tablero');
+    }
     renderBoardList();
   } else { await openBoard(id); $('#sidebar').classList.remove('open'); }
 });
@@ -2706,7 +2771,7 @@ function renderCommentPop() {
   $('#cpTitle').textContent = it.resolved ? '✔ Resuelto' : n ? `${n} mensaje${n > 1 ? 's' : ''}` : 'Nuevo comentario';
   $('#cpResolve').textContent = it.resolved ? '↺' : '✔'; $('#cpResolve').title = it.resolved ? 'Reabrir' : 'Marcar como resuelto';
   $('#cpResolve').style.display = n ? '' : 'none';
-  $('#cpMsgs').innerHTML = it.thread.map(m => `<div class="cp-msg"><div class="meta"><span class="avatar" style="background:${authorColor(m.author)}">${esc(initials(m.author))}</span><b>${esc(m.author || 'Anónimo')}</b><span title="${new Date(m.ts).toLocaleString()}">${timeAgo(m.ts)}</span><button class="tb" data-del="${m.id}" title="Borrar mensaje" style="width:22px;height:22px;margin-left:auto;font-size:11px">✕</button></div><div class="txt">${esc(m.text)}</div></div>`).join('') || '<div style="color:var(--muted)">Escribe el primer mensaje del hilo.</div>';
+  $('#cpMsgs').innerHTML = it.thread.map(m => `<div class="cp-msg"><div class="meta"><span class="avatar" style="background:${authorColor(m.author)}">${esc(initials(m.author))}</span><b>${esc(m.author || 'Anónimo')}</b><span title="${new Date(m.ts).toLocaleString()}">${timeAgo(m.ts)}</span><button class="tb" data-del="${esc(m.id)}" title="Borrar mensaje" style="width:22px;height:22px;margin-left:auto;font-size:11px">✕</button></div><div class="txt">${esc(m.text)}</div></div>`).join('') || '<div style="color:var(--muted)">Escribe el primer mensaje del hilo.</div>';
   $('#cpMsgs').scrollTop = 1e9;
   $('#cpAuthor').textContent = authorName() || 'Anónimo (poner nombre)';
 }
@@ -2763,7 +2828,7 @@ function renderCommentsList() {
   const list = S.items.filter(i => i.type === 'comment' && i.thread.length && (S.showResolved || !i.resolved)).sort((a, b) => lastTs(b) - lastTs(a));
   $('#clList').innerHTML = list.map(c => {
     const f = c.thread[0];
-    return `<div class="cl-item ${c.resolved ? 'res' : ''}" data-cid="${c.id}"><span class="avatar" style="background:${authorColor(f.author)}">${esc(initials(f.author))}</span><div style="flex:1;min-width:0"><div><b>${esc(f.author)}</b> <small style="color:var(--muted)">${timeAgo(lastTs(c))}${c.resolved ? ' · ✔ resuelto' : ''}</small></div><div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(f.text)}</div>${c.thread.length > 1 ? `<small style="color:var(--muted)">${c.thread.length - 1} respuesta${c.thread.length > 2 ? 's' : ''}</small>` : ''}</div></div>`;
+    return `<div class="cl-item ${c.resolved ? 'res' : ''}" data-cid="${esc(c.id)}"><span class="avatar" style="background:${authorColor(f.author)}">${esc(initials(f.author))}</span><div style="flex:1;min-width:0"><div><b>${esc(f.author)}</b> <small style="color:var(--muted)">${timeAgo(lastTs(c))}${c.resolved ? ' · ✔ resuelto' : ''}</small></div><div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(f.text)}</div>${c.thread.length > 1 ? `<small style="color:var(--muted)">${c.thread.length - 1} respuesta${c.thread.length > 2 ? 's' : ''}</small>` : ''}</div></div>`;
   }).join('') || '<div style="padding:10px;color:var(--muted)">No hay comentarios. Usa la herramienta 💬 (tecla C) y haz clic donde quieras comentar.</div>';
 }
 function updateCommentBadge() { const n = S.items.filter(i => i.type === 'comment' && !i.resolved && i.thread.length).length; $('#cmtBadge').textContent = n || ''; }
